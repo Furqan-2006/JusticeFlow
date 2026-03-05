@@ -1,0 +1,19 @@
+# Ignore C++ Compiled Binaries
+*.o
+*.out
+db_test
+main
+justiceflow
+
+# Ignore Python Virtual Environments (CRITICAL)
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Ignore IDE Settings (Your partner might use a different editor)
+.vscode/
+.idea/
+
+# Ignore System Files
+.DS_Store
