@@ -286,14 +286,14 @@ CREATE TYPE audit_action_enum AS ENUM (
 );
 
 CREATE TYPE audited_table_enum AS ENUM (
-    'Cases',
-    'Evidence',
-    'Officers',
-    'Arrests',
-    'Warrants',
-    'Charge_Sheets',
-    'Bail_Records',
-    'Accused'
+    'cases',
+    'evidence',
+    'officers',
+    'arrests',
+    'warrants',
+    'charge_sheets',
+    'bail_records',
+    'accused'
 );
 
 CREATE TYPE hotspot_risk_level_enum AS ENUM (

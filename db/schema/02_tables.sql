@@ -1019,3 +1019,18 @@ CREATE TABLE analytics.Model_Performance_Log (
     CONSTRAINT chk_training_window
         CHECK (training_to > training_from)
 );
+
+-- Sequence registry — guarantees unique NNNN per entity/station/year
+-- No application code ever touches this directly
+CREATE TABLE Sequence_Registry (
+    seq_id      BIGSERIAL PRIMARY KEY,
+    entity      VARCHAR(20)  NOT NULL,
+    -- e.g. 'FIR', 'ARR', 'WRT', 'BAIL', 'FLR', 'CS', 'DUTY', 'EVD'
+    scope_key   VARCHAR(50)  NOT NULL,
+    -- e.g. 'KHD-2024' for station-year scoped
+    --       'FIR-2024-KHD-0001' for evidence scoped to a FIR
+    last_value  INT          NOT NULL DEFAULT 0,
+
+    CONSTRAINT uq_sequence_entity_scope
+        UNIQUE (entity, scope_key)
+);
