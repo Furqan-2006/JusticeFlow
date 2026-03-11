@@ -1,3 +1,5 @@
+CREATE ROLE justice_app WITH LOGIN PASSWORD 'your_password';
+CREATE ROLE justice_ai  WITH LOGIN PASSWORD 'your_password';
 -- Only audit triggers can write to audit schema
 -- No application user can INSERT/UPDATE/DELETE directly
 REVOKE ALL ON SCHEMA audit FROM PUBLIC;

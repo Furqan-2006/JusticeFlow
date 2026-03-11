@@ -65,6 +65,8 @@ CREATE TABLE Cases (
     incident_date TIMESTAMPTZ NOT NULL CHECK (incident_date <= NOW()),
     incident_address TEXT NOT NULL,
     incident_description TEXT NOT NULL,
+    incident_lat  DECIMAL(9,6),
+    incident_lon  DECIMAL(9,6),
     station_id BIGINT NOT NULL REFERENCES Stations(station_id),
     primary_complainant_cnic VARCHAR(15) NOT NULL REFERENCES Persons(cnic),
     filed_by BIGINT NOT NULL REFERENCES Officers(officer_id),
@@ -78,7 +80,7 @@ CREATE TABLE Cases (
     approved_by BIGINT REFERENCES Officers(officer_id),
     approved_at TIMESTAMPTZ,
     reopened_by BIGINT REFERENCES Officers(officer_id),
-    reopened_by TIMESTAMPTZ,
+    reopened_at TIMESTAMPTZ,
     reopen_reason TEXT,
     CONSTRAINT chk_closed_requires_reason CHECK (
         closed_at IS NULL
@@ -221,12 +223,13 @@ CREATE TABLE Witnesses (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT chk_statement_exists CHECK (
         statement_text IS NOT NULL 
-        OR statment_file_path IS NOT NULL
+        OR statement_file_path IS NOT NULL
         )
 );
 
 CREATE TABLE Accused (
     accused_id BIGSERIAL PRIMARY KEY,
+    master_accused_cnic VARCHAR(50) REFERENCES persons(cnic), -- in case of accused having alias
     case_id BIGINT NOT NULL REFERENCES Cases(case_id) ON DELETE CASCADE,
     person_cnic VARCHAR(15) NOT NULL REFERENCES Persons(cnic),
     involvement_type involvement_type_enum NOT NULL DEFAULT 'SUSPECT',
@@ -372,7 +375,9 @@ CREATE TABLE Warrants (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     -- CONSTRAINTS
-    CONSTRAINT chk_valid_until_after_issue CHECK (valid_until > issue_date),
+    CONSTRAINT chk_valid_until_after_issue CHECK (
+        valid_until IS NULL OR valid_until > issue_date
+        ),
     CONSTRAINT chk_execution_requires_officer CHECK (
         executed_at IS NULL
         OR executed_by IS NOT NULL
@@ -467,7 +472,9 @@ CREATE TABLE IF NOT EXISTS Bails_Records (
 
 
     CONSTRAINT chk_bail_amount_positive CHECK (bail_amount IS NULL OR bail_amount > 0),
-    CONSTRAINT chk_valid_until_after_bail_date CHECK (valid_until > bail_date),
+    CONSTRAINT chk_valid_until_after_bail_date CHECK (
+        valid_until IS NULL OR valid_until > bail_date
+        ),
     CONSTRAINT chk_revocation_requires_reason CHECK (
         revoked_at IS NULL
         OR (
@@ -547,7 +554,7 @@ CREATE TABLE Forensic_Lab_Requests (
 );
 
 CREATE TABLE Forensic_Request_Evidence (
-    request_id BIGINT NOT NULL REFERENCES FORESENIC_LAB_REQUESTS(request_id) ON DELETE CASCADE,
+    request_id BIGINT NOT NULL REFERENCES Forensic_Lab_Requests(request_id) ON DELETE CASCADE,
     evidence_id BIGINT NOT NULL REFERENCES Evidence(evidence_id) ON DELETE CASCADE,
     notes TEXT,
     added_at TIMESTAMPTZ DEFAULT NOW(),
@@ -597,7 +604,7 @@ CREATE TABLE charge_sheets (
     ),
     CONSTRAINT chk_laws_invoked_not_empty CHECK (
         charge_sheet_status = 'DRAFT'
-        AND array_length(laws_invoked, 1) > 0
+        OR array_length(laws_invoked, 1) > 0
     )
 );
 

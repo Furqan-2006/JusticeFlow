@@ -99,6 +99,26 @@ CREATE TYPE association_type_enum AS ENUM (
     'KNOWN_ASSOCIATE'
 );
 
+CREATE TYPE case_type_enum AS ENUM (
+    -- Criminal (20)
+    'MURDER', 'ATTEMPTED_MURDER', 'MANSLAUGHTER',
+    'KIDNAPPING', 'HUMAN_TRAFFICKING',
+    'ROBBERY', 'ARMED_ROBBERY',
+    'ASSAULT', 'AGGRAVATED_ASSAULT',
+    'RAPE', 'SEXUAL_ASSAULT',
+    'BURGLARY', 'HOME_INVASION',
+    'ARSON', 'VANDALISM',
+    'DRUG_TRAFFICKING', 'DRUG_POSSESSION',
+    'TERRORISM', 'EXTORTION',
+    'GANG_ACTIVITY',
+    -- Civilian (10)
+    'THEFT', 'FRAUD', 'CYBERCRIME',
+    'HIT_AND_RUN', 'VEHICLE_THEFT',
+    'DOMESTIC_VIOLENCE', 'HARASSMENT',
+    'BRIBERY', 'FORGERY',
+    'PUBLIC_DISTURBANCE'
+);
+
 CREATE TYPE case_status_enum AS ENUM (
     'REGISTERED',
     'UNDER_INVESTIGATION',
@@ -156,7 +176,7 @@ CREATE TYPE warrant_status_enum AS ENUM (
 
 CREATE TYPE bail_type_enum AS ENUM (
     'REGULAR',
-    'ANTICIPTORY',
+    'ANTICIPATORY',
     'INTERIM',
     'SURETY'
 );
@@ -218,8 +238,7 @@ CREATE TYPE vehicle_role_enum AS ENUM (
     'ABANDONED',
     'EVIDENCE',
     'SUSPECTS_VEHICLE',
-    'VICTIMS_VEHICLE',
-
+    'VICTIMS_VEHICLE'
 );
 
 CREATE TYPE seizure_status_enum AS ENUM (
