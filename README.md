@@ -279,7 +279,3 @@ This project is developed for academic purposes as part of a multi-course integr
 <div align="center">
 <sub>Built with ⚖️ for DBMS · SDA · AI · OS</sub>
 </div>
-=======
-# JusticeFlow
-A legal-grade Police Case &amp; Evidence Management System integrating DBMS (audit triggers, ACID transactions), SDA (5 design patterns, UML), AI (crime hotspot detection, case prioritization), and OS (privilege daemon, file integrity monitor, process synchronization) into one cohesive system.
->>>>>>> ae86abeaa2cea43c8081f9148ac19c8d75a692dc
