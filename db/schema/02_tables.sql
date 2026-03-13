@@ -441,7 +441,7 @@ CREATE TABLE Arrests (
     )
 );
 
-CREATE TABLE IF NOT EXISTS Bails_Records (
+CREATE TABLE IF NOT EXISTS Bail_Records (
     bail_id BIGSERIAL PRIMARY KEY,
     bail_number VARCHAR(30) UNIQUE NOT NULL,
 
