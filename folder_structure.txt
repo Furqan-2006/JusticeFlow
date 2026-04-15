@@ -1,0 +1,180 @@
+justiceflow/
+│
+├── dashboard/
+│   ├── app.py              // Flask app (routes + API together)
+│   ├── db.py               // psycopg2 connection
+│   │
+│   ├── templates/
+│   │   ├── dashboard.html
+│   │   ├── os_metrics.html
+│   │   ├── ai_status.html
+│   │   └── analytics.html
+│   │
+│   ├── static/
+│   │   ├── js/
+│   │   │   ├── charts.js
+│   │   │   └── live_updates.js
+│   │   └── css/
+│   │       └── styles.css
+│   │
+│   ├── requirements.txt
+│   └── run.py
+|
+├── db/
+├── docs/
+|
+├── src/
+|   |
+|   ├── ai_agents/
+|   |   ├── hotspot_agent.py
+|   |   ├── priority_agent.py
+|   |   └── workload.py
+|   |   
+|   ├── common/
+|   |   ├── common.h
+|   |   ├── constants.h
+|   |   ├── dbconfig.h
+|   |   ├── ipc_types.h
+|   |   └── logger.h
+|   |   
+|   ├── os_layer/
+|   │   ├── scheduler/            // Furqan (control plane)
+|   |   |   ├── include/
+|   │   │   |   ├── scheduler_module.h      // umbrella the other headers for os_layer.h
+|   │   │   |   ├── scheduler.h
+|   │   │   |   ├── daemon.h
+|   │   │   |   ├── timer.h
+|   │   │   |   ├── job_executor.h
+|   │   │   |   ├── process_spawner.h
+|   │   │   |   └── signal_handler.h
+|   |   |   ├── src/
+|   │   │       ├── scheduler.cpp
+|   │   │       ├── daemon.cpp            // double-fork + setsid
+|   │   │       ├── timer.cpp             // SIGALRM + setitimer
+|   │   │       ├── job_executor.cpp      // runs DB + AI jobs
+|   │   │       ├── process_spawner.cpp   // fork + exec agents
+|   │   │       └── signal_handler.cpp    // SIGCHLD, SIGALRM
+|   │   │
+|   │   ├── ipc/                  // Abdullah (data plane)
+|   |   |   ├── include/
+|   │   │   |   ├── ipc_module.h           // umbrella the other headers for os_layer.h
+|   │   │   |   ├── ipc_manager.h
+|   │   │   |   ├── unix_socket.h
+|   │   │   |   ├── fifo.h
+|   │   │   |   ├── shared_memory.h
+|   │   │   |   └── shm_layout.h          // shared struct layout
+|   |   |   ├── src/
+|   │   │       ├── ipc_manager.cpp       // unified interface
+|   │   │       ├── unix_socket.cpp       // PostgreSQL (libpq)
+|   │   │       ├── fifo.cpp              // mkfifo for agents
+|   │   │       └── shared_memory.cpp     // shm_open + mmap
+|   │   │
+|   │   ├── threading/           // Abu Bakar (execution layer)
+|   |   |   ├── include/
+|   │   │   |   ├── threading_module.h     // umbrella the other headers for os_layer.h
+|   │   │   |   ├── thread_pool.h
+|   │   │   |   ├── worker.h
+|   │   │   |   ├── session_manager.h
+|   │   │   |   └── sync.h               // mutex, sem, cond wrappers
+|   |   |   ├── src/
+|   │   │       ├── thread_pool.cpp
+|   │   │       ├── worker.cpp
+|   │   │       ├── session_manager.cpp
+|   │   │       └── connection_gate.cpp  // semaphore limiter
+|   │   │
+|   │   ├── memory/              // shared responsibility
+|   |   |   ├── include/
+|   │   │   |   ├── mmap_handler.h
+|   │   │   |   └── mlock_guard.h
+|   |   |   ├── src/
+|   │   │       ├── mmap_handler.cpp
+|   │   │       └── mlock_guard.cpp
+|   │   │
+|   │   ├── process/             // shared core utilities
+|   |   |   ├── include/
+|   │   │   |   ├── process_manager.h
+|   │   │   |   └── process_registry.h
+|   |   |   ├── src/
+|   │   │       ├── process_manager.cpp
+|   │   │       └── process_registry.cpp
+|   │   │
+|   |   ├── README.md            // OS layer overview 
+|   |   ├── DESIGN.md            // process topology, ipc diagram, how everything starts/stops
+|   │   └── os_layer.h           // top-level interface
+|   |
+|   ├── shr_infra/              // auth and session layer --- shared infrastructure
+|   │   ├── auth/
+|   |   |   ├── include/
+|   │   │   |   ├── auth.h
+|   │   │   |   ├── session.h
+|   │   │   |   └── token.h
+|   |   |   ├── src/
+|   │   │       ├── auth.cpp
+|   │   │       ├── session.cpp
+|   │   │       └── token.cpp
+|   │   │
+|   │   ├── middleware/
+|   │       ├── auth_middleware.h
+|   │       └── auth_middleware.cpp
+|   |
+|   ├── subsystem1/
+|   ├── subsystem2/
+|   ├── subsystem3/
+|   |   │
+|   |   ├── security/                  ← Enforcement layer (NOT authentication)
+|   |   |   ├── include/
+|   |   │   |   ├── access_control.h
+|   |   │   |   ├── enforcement.h
+|   |   │   |   └── policy_engine.h
+|   |   |   ├── src/
+|   |   │       ├── access_control.cpp    // uses infra auth → enforces permissions
+|   |   │       ├── enforcement.cpp        // arrest, warrant, bail logic
+|   |   │       └── policy_engine.cpp     // rule evaluation (who can do what action)
+|   |   │
+|   |   ├── audit/                     ← System-wide traceability
+|   |   |   ├── include/
+|   |   │   |   ├── activity_tracker.h
+|   |   │   |   ├── audit_log.h
+|   |   │   |   └── audit_query.h
+|   |   |   ├── src/
+|   |   │       ├── activity_tracker.cpp  // tracks actions from all subsystems
+|   |   │       ├── audit_log.cpp         // persistent logs (DB/files)
+|   |   │       └── audit_query.cpp       // fetch/filter logs
+|   |   │
+|   |   ├── legal/                     ← Domain rules & validation
+|   |   |   ├── include/
+|   |   │   |   ├── case_validation.h
+|   |   │   |   ├── evidence_rules.h
+|   |   │   |   └── compliance.h
+|   |   |   ├── src/
+|   |   │       ├── compliance.cpp        // policy compliance (laws, SOPs)
+|   |   │       ├── case_validation.cpp   // FIR / case legality checks
+|   |   │       └── evidence_rules.cpp    // admissibility, constraints
+|   |   │
+|   |   ├── integration/               ← Bridges to other subsystems
+|   |   |   ├── include/
+|   |   │   |   ├── s1_bridge.h
+|   |   │   |   ├── s2_bridge.h
+|   |   │   |   └── audit_bridge.h
+|   |   |   ├── src/
+|   |   │       ├── s1_bridge.cpp         // hooks for subsystem1
+|   |   │       ├── s2_bridge.cpp         // hooks for subsystem2
+|   |   │       └── audit_bridge.cpp      // centralized logging entry point
+|   |   │
+|   |   └── utils/                     ← Internal helpers
+|   |       ├── include/
+|   |       |   ├── rule_utils.h
+|   |       |   └── time_utils.h
+|   |       ├── src/
+|   |           ├── rule_utils.cpp
+|   |           └── time_utils.cpp
+|
+├── tests/
+|   ├── 
+|   └── db_test.cpp
+|
+├── .gitignore
+├── folder_structure.txt
+├── justiceflow_setup.sh
+├── MakeFile
+└── README.md
