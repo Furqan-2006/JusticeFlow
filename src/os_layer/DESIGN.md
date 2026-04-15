@@ -33,26 +33,26 @@ This document describes the internal architecture of the `os_layer`: process top
 
 ```
                         ┌─────────────────────────────────────┐
-                        │           Supervisor Process         │
-                        │         (daemon, PID stored in       │
-                        │          /var/run/<app>.pid)         │
-                        │                                      │
+                        │           Supervisor Process        │
+                        │         (daemon, PID stored in      │
+                        │          /var/run/<app>.pid)        │
+                        │                                     │
                         │  ┌──────────┐   ┌────────────────┐  │
                         │  │ Scheduler│   │  Thread Pool   │  │
                         │  │  (timer) │   │  (N workers)   │  │
                         │  └────┬─────┘   └───────┬────────┘  │
-                        │       │                 │            │
+                        │       │                 │           │
                         │  ┌────▼─────────────────▼────────┐  │
-                        │  │         IPC Manager            │  │
-                        │  │  unix_socket | fifo | shm      │  │
-                        │  └────┬──────────────┬────────────┘  │
-                        └───────┼──────────────┼───────────────┘
+                        │  │         IPC Manager           │  │
+                        │  │  unix_socket | fifo | shm     │  │
+                        │  └────┬──────────────┬───────────┘  │
+                        └───────┼──────────────┼──────────────┘
                                 │              │
                fork+exec        │              │ fork+exec
                     ┌───────────▼──┐      ┌────▼──────────────┐
-                    │  Agent [0]   │      │    Agent [N]       │
-                    │  (child PID) │ ...  │    (child PID)     │
-                    └──────────────┘      └───────────────────-┘
+                    │  Agent [0]   │      │    Agent [N]      │
+                    │  (child PID) │ ...  │    (child PID)    │
+                    └──────────────┘      └───────────────────┘
 ```
 
 **Supervisor** is the single long-running daemon. It owns the scheduler, the thread pool, and all IPC endpoints.
@@ -72,11 +72,11 @@ The `process_registry` maps each child PID to its role and FIFO/shm identifiers,
 Three transports are used concurrently, each selected for a specific traffic class:
 
 ```
- ┌──────────────────────────────────────────────────────────────────┐
- │                         IPC Manager                              │
- │                   (unified interface layer)                      │
- └───────────┬──────────────────┬──────────────────┬───────────────┘
-             │                  │                  │
+ ┌────────────────────────────────────────────────────────────────┐
+ │                         IPC Manager                            │
+ │                   (unified interface layer)                    │
+ └───────────┬──────────────────┬─────────────────┬───────────────┘
+             │                  │                 │
     ┌────────▼──────┐  ┌────────▼──────┐  ┌───────▼────────┐
     │  UNIX Socket  │  │  Named FIFO   │  │ Shared Memory  │
     │  (libpq conn  │  │  (mkfifo)     │  │ (shm_open +    │
@@ -126,20 +126,20 @@ Segments are named `/shm_agent_<pid>` and unlinked by the supervisor after the r
            ▼
    ┌───────────────┐
    │  Thread Pool  │   N worker threads (N configured at startup)
-   │  (work queue) │──────────────────────────────────────────────┐
-   └───────────────┘                                              │
-           │                                                      │
+   │  (work queue) │─────────────────────────────────────────────┐
+   └───────────────┘                                             │
+           │                                                     │
      ┌─────▼─────┐   ┌──────────────┐   ┌────────────────┐       │
      │  Worker   │   │   Worker     │   │    Worker      │  ...  │
      │  Thread   │   │   Thread     │   │    Thread      │       │
      └─────┬─────┘   └──────┬───────┘   └────────┬───────┘       │
            │                │                    │               │
            └────────────────┼────────────────────┘               │
-                            │                                     │
+                            │                                    │
                    ┌────────▼────────┐                           │
-                   │ Connection Gate │  (semaphore, max M slots)  │
+                   │ Connection Gate │  (semaphore, max M slots) │
                    └────────┬────────┘                           │
-                            │                                     │
+                            │                                    │
                    ┌────────▼────────┐                           │
                    │  IPC Manager /  │                           │
                    │   PostgreSQL    │                           │
@@ -243,14 +243,49 @@ Steps 2 and 3 are the longest; the rest are sub-millisecond. No IPC resource is 
 
 ## 8. Memory Strategy
 
-| Concern                  | Mechanism                                                                |
-| ------------------------ | ------------------------------------------------------------------------ | ------------------------------------------ |
-| Agent result payloads    | `shm_open` + `mmap(MAP_SHARED)` — zero-copy between supervisor and agent |
-| Large file / model data  | `mmap_handler` — `mmap(MAP_PRIVATE                                       | MAP_POPULATE)`with explicit`madvise` hints |
-| Sensitive in-memory data | `mlock_guard` — pins pages; prevents swap; RAII release on scope exit    |
-| General allocations      | Standard `malloc` / C++ allocators; no custom allocator at this layer    |
+The OS layer uses four distinct memory mechanisms, each chosen for a specific access pattern.
+The guiding principle is: **avoid unnecessary copies, and never let sensitive data reach swap**.
 
-`mlock_guard` is intended for credential buffers and session key material only. Locking large regions is avoided to prevent exhausting the process `RLIMIT_MEMLOCK` budget.
+### POSIX Shared Memory — Agent Result Payloads
+
+Agent result payloads (inference outputs, query results) are exchanged through `shm_open` +
+`mmap(MAP_SHARED)`. When the supervisor spawns an agent, it creates a named segment
+`/shm_agent_<pid>` and passes the name to the child. The agent writes its result directly into
+the mapped region; the supervisor reads from the same physical pages — no kernel copy occurs in
+either direction. The supervisor calls `shm_unlink` immediately after consuming the result so the
+segment does not outlive its use.
+
+### Memory-Mapped Files — Large Data & Model Assets
+
+Large files (model weights, bulk datasets) are loaded through `mmap_handler` using
+`mmap(MAP_PRIVATE | MAP_POPULATE)`. `MAP_POPULATE` pre-faults the pages at map time, trading
+an upfront cost for elimination of page-fault stalls during inference. `madvise(MADV_SEQUENTIAL)`
+or `madvise(MADV_RANDOM)` hints are applied depending on the known access pattern of the asset.
+Writes are never needed on these mappings; `MAP_PRIVATE` ensures the underlying file is
+never modified.
+
+### Memory Locking — Sensitive In-Memory Data
+
+Credential buffers, session keys, and any material that must not be written to disk are pinned
+via `mlock_guard`. This is an RAII type: the constructor calls `mlock` on the region, the
+destructor calls `munlock` and zeroes the buffer before releasing. Locking is intentionally
+narrow — only the exact buffers that hold sensitive data — to avoid exhausting the process
+`RLIMIT_MEMLOCK` budget. Large regions such as model weights are never locked.
+
+### General Heap Allocations
+
+Everything else uses standard `malloc` / C++ allocators. No custom allocator is introduced at
+this layer. Keeping the allocator default simplifies tooling (Valgrind, ASan, heaptrack) and
+avoids the class of bugs that custom pools introduce.
+
+### Summary
+
+| Concern                        | Mechanism                              | Key property                  |
+|-------------------------------|----------------------------------------|-------------------------------|
+| Agent result payloads          | `shm_open` + `mmap(MAP_SHARED)`        | Zero-copy between processes   |
+| Large file / model data        | `mmap(MAP_PRIVATE \| MAP_POPULATE)`    | Pre-faulted, no file mutation |
+| Sensitive in-memory data       | `mlock_guard` (RAII)                   | Never swapped, zeroed on free |
+| General allocations            | Standard `malloc` / C++ allocators     | Tooling-compatible, simple    |
 
 ---
 
