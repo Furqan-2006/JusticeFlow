@@ -10,7 +10,12 @@ namespace JusticeFlow
 
     /**
      * @brief Holds database connection parameters and pool settings.
-     * Designed to be instantiated once at startup and passed to the DB manager/pool.
+     *
+     * SECURITY POLICY (Ref: 6.2 Connection Rules -- Integration Contracts):
+     * - C++ Application Layer MUST connect as 'justice_app'.
+     * - 'justice_ai' is reserved for Python AI agents.
+     * - 'DB_ADMIN' is strictly prohibited from application use.
+     * - Audit writes are handled by SECURITY DEFINER triggers, not the app.
      */
     struct DBConfig
     {
@@ -18,7 +23,7 @@ namespace JusticeFlow
         std::string host = "127.0.0.1";
         int port = 5432;
         std::string dbname = "justiceflow_db";
-        std::string user = "justice_app"; // Standard least-privilege role
+        std::string user = "justice_app"; // Forced default for C++ layer
         std::string password = "";
 
         // Connection pool and timeout settings
@@ -37,6 +42,30 @@ namespace JusticeFlow
                    " user=" + user +
                    " password=" + password +
                    " connect_timeout=" + std::to_string(connect_timeout);
+        }
+
+        /**
+         * @brief Validates the loaded configuration against security rules.
+         */
+        ResultCode validateSecurityRules() const
+        {
+            if (host.empty() || user.empty() || password.empty() || dbname.empty())
+            {
+                return ResultCode::INVALID_INPUT;
+            }
+
+            // STRICT ENFORCEMENT: C++ layer can ONLY operate as justice_app
+            if (user == "DB_ADMIN" || user == "justice_ai")
+            {
+                return ResultCode::AUTH_FAILED;
+            }
+
+            if (user != "justice_app")
+            {
+                return ResultCode::AUTH_FAILED;
+            }
+
+            return ResultCode::OK;
         }
 
         /**
@@ -65,13 +94,7 @@ namespace JusticeFlow
             if (env_pass)
                 password = env_pass;
 
-            // Validate that critical fields were actually provided
-            if (host.empty() || user.empty() || password.empty() || dbname.empty())
-            {
-                return ResultCode::INVALID_INPUT;
-            }
-
-            return ResultCode::OK;
+            return validateSecurityRules();
         }
 
         /**
@@ -113,12 +136,7 @@ namespace JusticeFlow
 
             file.close();
 
-            if (host.empty() || user.empty() || password.empty() || dbname.empty())
-            {
-                return ResultCode::INVALID_INPUT;
-            }
-
-            return ResultCode::OK;
+            return validateSecurityRules();
         }
     };
 
