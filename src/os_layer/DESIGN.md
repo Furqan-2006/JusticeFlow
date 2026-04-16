@@ -255,14 +255,18 @@ the mapped region; the supervisor reads from the same physical pages — no kern
 either direction. The supervisor calls `shm_unlink` immediately after consuming the result so the
 segment does not outlive its use.
 
-### Memory-Mapped Files — Large Data & Model Assets
+### Memory-Mapped Files — Large Data, Model Assets & Shared Memory Flushes
 
-Large files (model weights, bulk datasets) are loaded through `mmap_handler` using
-`mmap(MAP_PRIVATE | MAP_POPULATE)`. `MAP_POPULATE` pre-faults the pages at map time, trading
-an upfront cost for elimination of page-fault stalls during inference. `madvise(MADV_SEQUENTIAL)`
+Large files (model weights, bulk datasets, evidence files) are loaded through `mmap_handler`
+using `mmap(MAP_PRIVATE | MAP_POPULATE)`. `MAP_POPULATE` pre-faults the pages at map time,
+trading an upfront cost for elimination of page-fault stalls during inference. `madvise(MADV_SEQUENTIAL)`
 or `madvise(MADV_RANDOM)` hints are applied depending on the known access pattern of the asset.
-Writes are never needed on these mappings; `MAP_PRIVATE` ensures the underlying file is
-never modified.
+Writes are never needed on these mappings; `MAP_PRIVATE` ensures the underlying file is never modified.
+
+`mmap_handler` also owns `msync()` calls for any `MAP_SHARED` region where writes must be
+flushed to the backing store before the segment is handed off or unlinked. Specifically, the
+scheduler calls `msync(MS_SYNC)` on the agent status table in shared memory after each update
+to guarantee the main application never reads a partially written state.
 
 ### Memory Locking — Sensitive In-Memory Data
 
@@ -283,9 +287,10 @@ avoids the class of bugs that custom pools introduce.
 | Concern                        | Mechanism                              | Key property                  |
 |-------------------------------|----------------------------------------|-------------------------------|
 | Agent result payloads          | `shm_open` + `mmap(MAP_SHARED)`        | Zero-copy between processes   |
-| Large file / model data        | `mmap(MAP_PRIVATE \| MAP_POPULATE)`    | Pre-faulted, no file mutation |
+| Large file / model data + shm flushes | `mmap(MAP_PRIVATE \| MAP_POPULATE)` + `msync()` | Pre-faulted, no mutation; writes flushed atomically |
 | Sensitive in-memory data       | `mlock_guard` (RAII)                   | Never swapped, zeroed on free |
 | General allocations            | Standard `malloc` / C++ allocators     | Tooling-compatible, simple    |
+
 
 ---
 

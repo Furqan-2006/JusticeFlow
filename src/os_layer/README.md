@@ -4,13 +4,13 @@ The `os_layer` is the foundational system services layer of the platform. It abs
 
 The layer is split across five subsystems, each with a single responsibility:
 
-| Subsystem | Owner | Role |
-|---|---|---|
-| `scheduler/` | Furqan | Control plane — daemon lifecycle, timers, job dispatch |
-| `ipc/` | Abdullah | Data plane — sockets, FIFOs, shared memory |
+| Subsystem    | Owner     | Role                                                            |
+| ------------ | --------- | --------------------------------------------------------------- |
+| `scheduler/` | Furqan    | Control plane — daemon lifecycle, timers, job dispatch          |
+| `ipc/`       | Abdullah  | Data plane — sockets, FIFOs, shared memory                      |
 | `threading/` | Abu Bakar | Execution layer — thread pool, sessions, concurrency primitives |
-| `memory/` | Shared | Memory mapping and locking utilities |
-| `process/` | Shared | Process registry and lifecycle helpers |
+| `memory/`    | Shared    | Memory mapping and locking utilities                            |
+| `process/`   | Shared    | Process registry and lifecycle helpers                          |
 
 ---
 
@@ -88,18 +88,23 @@ os_layer/
 ## Subsystem Summaries
 
 ### Scheduler (`scheduler/`) — Control Plane
+
 Owns the daemon lifecycle and drives all timed and event-triggered work. On startup it performs a double-fork to detach from the terminal, sets up interval timers via `setitimer`, and routes `SIGALRM` / `SIGCHLD` signals to the appropriate handlers. `job_executor` runs database maintenance and AI inference jobs; `process_spawner` forks and execs agent child processes on demand.
 
 ### IPC (`ipc/`) — Data Plane
+
 Provides the communication backbone. `ipc_manager` presents a single interface regardless of transport. UNIX domain sockets carry PostgreSQL traffic via `libpq`; named FIFOs (created with `mkfifo`) carry lightweight command/response messages to and from spawned agents; POSIX shared memory (mapped with `shm_open` + `mmap`) carries high-throughput structured data defined in `shm_layout.h`.
 
 ### Threading (`threading/`) — Execution Layer
+
 Manages concurrent request processing. A fixed-size thread pool picks up jobs dispatched by the scheduler. `session_manager` tracks the lifecycle of active client sessions. `connection_gate` enforces an upper bound on simultaneous database connections using a semaphore, preventing resource exhaustion under load.
 
 ### Memory (`memory/`)
-Utility wrappers around `mmap`/`munmap` and `mlock`/`munlock`. `mlock_guard` is an RAII type that pins critical memory regions and releases them on scope exit, ensuring no sensitive data is ever swapped to disk.
+
+Utility wrappers around `mmap`/`munmap` and `mlock`/`munlock`. `mlock_guard` is an RAII type that pins critical memory regions and releases them on scope exit, ensuring no sensitive data is ever swapped to disk. `mmap_handler` wraps `mmap`/`munmap`, `madvise` hints, and `msync` for flushing `MAP_SHARED` writes before handoff or unlink.
 
 ### Process (`process/`)
+
 Shared helpers used across subsystems. `process_registry` maintains a live table of all child PIDs, their roles, and their current state. `process_manager` wraps `waitpid` and provides clean reap/restart logic consumed by `signal_handler`.
 
 ---
@@ -118,21 +123,21 @@ This header transitively pulls in `scheduler_module.h`, `ipc_module.h`, and `thr
 
 ## Dependencies
 
-| Dependency | Used by |
-|---|---|
-| POSIX (`unistd.h`, `signal.h`, `sys/wait.h`) | scheduler, process |
-| `sys/mman.h` | memory, ipc/shared_memory |
-| `sys/socket.h`, `sys/un.h` | ipc/unix_socket |
-| `libpq` (PostgreSQL C client) | ipc/unix_socket |
-| `pthread` | threading |
+| Dependency                                   | Used by                   |
+| -------------------------------------------- | ------------------------- |
+| POSIX (`unistd.h`, `signal.h`, `sys/wait.h`) | scheduler, process        |
+| `sys/mman.h`                                 | memory, ipc/shared_memory |
+| `sys/socket.h`, `sys/un.h`                   | ipc/unix_socket           |
+| `libpq` (PostgreSQL C client)                | ipc/unix_socket           |
+| `pthread`                                    | threading                 |
 
 ---
 
 ## Ownership
 
-| Subsystem | Primary Owner |
-|---|---|
-| `scheduler/` | Furqan |
-| `ipc/` | Abdullah |
-| `threading/` | Abu Bakar |
-| `memory/`, `process/` | Shared |
+| Subsystem             | Primary Owner |
+| --------------------- | ------------- |
+| `scheduler/`          | Furqan        |
+| `ipc/`                | Abdullah      |
+| `threading/`          | Abu Bakar     |
+| `memory/`, `process/` | Shared        |
