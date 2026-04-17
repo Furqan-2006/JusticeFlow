@@ -10,5 +10,5 @@ namespace Daemon
      *        Returns ResultCode::OK on success, or an error on failure
      */
 
-    ResultCode init(const char *pid_file_path = "/var/run/justiceflow.pid");
+    JusticeFlow::ResultCode init(const char *pid_file_path = "/var/run/justiceflow.pid");
 }

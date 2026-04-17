@@ -25,6 +25,6 @@ private:
 public:
     static ProcessManager &getInstance();
 
-    ResultCode reapOne(pid_t pid, ProcessAction &out_action);
-    ResultCode reapAll();
+    JusticeFlow::ResultCode reapOne(pid_t pid, ProcessAction &out_action);
+    JusticeFlow::ResultCode reapAll();
 };

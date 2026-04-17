@@ -49,9 +49,9 @@ private:
 public:
     static ProcessRegistry &getProcessRegistry();
 
-    ResultCode registerProcess(pid_t pid, const ProcessRecord &record);
-    ResultCode updateState(pid_t pid, ProcessState new_state);
-    ResultCode getRecord(pid_t pid, ProcessRecord &out_record);
-    ResultCode removeRecord(pid_t pid);
-    ResultCode getAllPids(std::vector<pid_t> &out_pids);
+    JusticeFlow::ResultCode registerProcess(pid_t pid, const ProcessRecord &record);
+    JusticeFlow::ResultCode updateState(pid_t pid, ProcessState new_state);
+    JusticeFlow::ResultCode getRecord(pid_t pid, ProcessRecord &out_record);
+    JusticeFlow::ResultCode removeRecord(pid_t pid);
+    JusticeFlow::ResultCode getAllPids(std::vector<pid_t> &out_pids);
 };
