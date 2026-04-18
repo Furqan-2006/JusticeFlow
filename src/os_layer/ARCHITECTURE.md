@@ -1,4 +1,4 @@
-## Full OS Layer Architecture
+# OS Layer — Full Architecture
 
 ---
 
@@ -48,8 +48,10 @@ Scheduler (Singleton, State Machine)
     └── StatusTableUpdater  — writes to SharedStatusTable on completion
 ```
 
----
+**`scheduler_module.h`**
+Umbrella header for the scheduler subsystem. Includes `scheduler.h`, `daemon.h`, `timer.h`, `job_executor.h`, `process_spawner.h`, and `signal_handler.h` in the correct dependency order. This is the only scheduler header that `os_layer.h` includes. No implementation — includes only.
 
+---
 ---
 
 ## Abdullah — `ipc/`
@@ -60,20 +62,37 @@ Owns the entire `libpq` connection lifecycle. Not a singleton — a connection o
 **`fifo.h/.cpp`**
 Owns named pipe lifecycle for all three AI agents. Three operations — `create(path)` wrapping `mkfifo`, `readStatus(path, AgentStatusMessage&)` for the scheduler to receive agent completion messages, and `destroy(path)` wrapping `unlink`. Reads are non-blocking — `O_NONBLOCK` so the scheduler never hangs waiting for an agent that crashed silently. If no data is available, return a specific `ResultCode` so the caller knows to try again next tick rather than treating it as an error. Depends on `ipc_types.h` for `AgentStatusMessage` and FIFO path constants.
 
+**`shm_layout.h`**
+Header-only. Defines the fixed `ShmResultHeader` struct that every agent-result shared memory segment begins with — `magic`, `version`, `agent_pid`, `timestamp_us`, `payload_bytes`, and `status`. No implementation. Kept separate from `shared_memory.h` deliberately — any file that needs to read or write a result payload includes only this header without pulling in the full `shm_open`/`mmap` lifecycle. Both `shared_memory.h` and the Python AI agents depend on this layout being stable.
+
+```cpp
+struct ShmResultHeader {
+    uint32_t magic;         // sanity sentinel
+    uint32_t version;       // layout version
+    pid_t    agent_pid;     // producing agent
+    uint64_t timestamp_us;  // microseconds since epoch
+    size_t   payload_bytes; // byte length of payload following header
+    int      status;        // 0 = ok, non-zero = agent error code
+};
+// payload bytes follow immediately after the header
+```
+
 **`shared_memory.h/.cpp`**
-Owns the `SharedStatusTable` segment lifecycle. Three operations — `create()` wrapping `shm_open` + `ftruncate` + `mmap`, `attach()` for the main application process to map an already-created segment, and `destroy()` wrapping `munmap` + `shm_unlink`. The mutex inside `SharedStatusTable` must be initialised with `PTHREAD_PROCESS_SHARED` and `PTHREAD_MUTEX_ROBUST` attributes — robust mutexes recover if the owning process dies holding the lock. Returns a typed `SharedStatusTable*` pointer, never a raw `void*`. Depends on `ipc_types.h` for the struct layout.
+Owns the `SharedStatusTable` segment lifecycle. Three operations — `create()` wrapping `shm_open` + `ftruncate` + `mmap`, `attach()` for the main application process to map an already-created segment, and `destroy()` wrapping `munmap` + `shm_unlink`. The mutex inside `SharedStatusTable` must be initialised with `PTHREAD_PROCESS_SHARED` and `PTHREAD_MUTEX_ROBUST` attributes — robust mutexes recover if the owning process dies holding the lock. Returns a typed `SharedStatusTable*` pointer, never a raw `void*`. Depends on `ipc_types.h` for the struct layout and `shm_layout.h` for the result header definition.
 
 **`ipc_manager.h/.cpp`**
 The unified interface — the only IPC file the rest of the system ever includes directly. Singleton. Owns one `unix_socket` instance, one `fifo` instance, and one `shared_memory` instance as private members. Exposes a high-level interface — `connectDatabase()`, `disconnectDatabase()`, `executeQuery()`, `readAgentStatus(agent_index, AgentStatusMessage&)`, `updateAgentStatus(agent_index, AgentStatus&)`, `getStatusTable()`. No caller outside `ipc/` ever touches `unix_socket`, `fifo`, or `shared_memory` directly.
 
----
+**`ipc_module.h`**
+Umbrella header for the IPC subsystem. Includes `ipc_manager.h`, `unix_socket.h`, `fifo.h`, `shared_memory.h`, and `shm_layout.h`. This is the only IPC header that `os_layer.h` includes. No implementation — includes only.
 
+---
 ---
 
 ## Abu Bakar — `threading/`
 
 **`sync.h`**
-Header-only. Three RAII types — `MutexGuard` (wraps `pthread_mutex_t`, locks on construction, unlocks on destruction), `SemGuard` (wraps `sem_t`, `sem_wait` on construction, `sem_post` on destruction), `CondVar` (wraps `pthread_cond_t`, exposes `wait(MutexGuard&)`, `signal()`, `broadcast()`). Also wraps `pthread_rwlock_t` as `RWLockReadGuard` and `RWLockWriteGuard` for the config table. No `.cpp` needed. First file to write because every other threading file depends on it.
+Header-only. Three RAII types — `MutexGuard` (wraps `pthread_mutex_t`, locks on construction, unlocks on destruction), `SemGuard` (wraps `sem_t`, `sem_wait` on construction, `sem_post` on destruction), `CondVar` (wraps `pthread_cond_t`, exposes `wait(MutexGuard&)`, `signal()`, `broadcast()`). Also wraps `pthread_rwlock_t` as `RWLockReadGuard` and `RWLockWriteGuard` for read-heavy config data. No `.cpp` needed — all inline. First file to write because every other threading file depends on it.
 
 **`connection_gate.h/.cpp`**
 A single counting semaphore initialised to `M` — the maximum concurrent database connections. Two methods only — `acquire()` and `release()`. Internally uses `SemGuard` from `sync.h`. Value of `M` comes from `DBConfig::max_connections`. Singleton. Every worker calls `acquire()` before touching `ipc_manager.executeQuery()` and `release()` on completion or error path. Separate from `thread_pool` by design — DB connection limit is an independent policy from pool size.
@@ -87,8 +106,37 @@ Represents one thread's execution loop. Not a thread itself — just the work fu
 **`thread_pool.h/.cpp`**
 The assembler. Owns thread creation, the work queue, and shutdown. On `init(N)` creates N `pthread` threads each running the `worker` loop. Owns a condition-variable-protected work queue — `submit(Job*)` adds to the queue and calls `CondVar::signal()`, sleeping workers wake and pull the next job. On shutdown sets a flag, calls `CondVar::broadcast()` to wake all sleeping workers, then joins all N threads. The `CondVar` for AI result notification is also owned here and broadcast by `StatusTableUpdater` from the scheduler side.
 
+**`threading_module.h`**
+Umbrella header for the threading subsystem. Includes `thread_pool.h`, `worker.h`, `session_manager.h`, `connection_gate.h`, and `sync.h`. This is the only threading header that `os_layer.h` includes. No implementation — includes only.
+
+---
 ---
 
+## Shared — `memory/`
+
+**`mmap_handler.h/.cpp`**
+Owns all `mmap`/`munmap` operations and `madvise` hints for file-backed mappings. Two primary operations — `mapFile(path, size, MapMode&)` wrapping `mmap(MAP_PRIVATE | MAP_POPULATE)` for large read-only assets such as evidence files and model weights, and `unmap(addr, size)` wrapping `munmap`. `MapMode` is a small enum — `SEQUENTIAL` applies `madvise(MADV_SEQUENTIAL)`, `RANDOM` applies `madvise(MADV_RANDOM)`. Also owns `msync()` for flushing `MAP_SHARED` writes — called by the scheduler after updating the agent status table in shared memory to guarantee the main application never reads a partially written state. `MAP_PRIVATE` mappings never call `msync` — writes on those are discarded by design.
+
+**`mlock_guard.h/.cpp`**
+RAII type that pins a memory region in physical RAM. Constructor calls `mlock(addr, size)` on the region; destructor calls `munlock` and zeroes the buffer with `memset` before releasing. Intended strictly for credential buffers, session keys, and security-critical structures — never for large regions such as model weights or evidence files, to avoid exhausting the process `RLIMIT_MEMLOCK` budget. Used by `session_manager` to pin the session table and by `auth_manager` to pin credential buffers.
+
+---
+---
+
+## Top-Level Interface
+
+**`os_layer.h`**
+The single public interface for the entire OS layer. Any module outside `os_layer/` includes only this file — never individual subsystem headers directly. Includes the three umbrella headers in dependency order:
+
+```cpp
+#include "scheduler/include/scheduler_module.h"
+#include "ipc/include/ipc_module.h"
+#include "threading/include/threading_module.h"
+```
+
+`memory/` and `process/` headers are not exposed through `os_layer.h` directly — they are internal utilities consumed by the three subsystems above. If an external module needs `mlock_guard` for credential pinning, it includes it directly from `memory/include/mlock_guard.h` by exception only.
+
+---
 ---
 
 ## Combined OS Layer Build Order
@@ -108,18 +156,27 @@ Phase 2 — Independent modules
 Phase 3 — Mid-tier
   8.  signal_handler            [Furqan]
   9.  fifo                      [Abdullah]
-  10. shared_memory             [Abdullah]
-  11. worker                    [Abu Bakar]
+  10. shm_layout.h              [Abdullah]   ← header only, no .cpp
+  11. shared_memory             [Abdullah]
+  12. mmap_handler              [Shared]
+  13. mlock_guard               [Shared]
+  14. worker                    [Abu Bakar]
 
 Phase 4 — Assemblers
-  12. timer                     [Furqan]
-  13. ipc_manager               [Abdullah]   ← assembles all three transports
-  14. thread_pool               [Abu Bakar]  ← assembles threading layer
+  15. timer                     [Furqan]
+  16. ipc_manager               [Abdullah]   ← assembles all three transports
+  17. thread_pool               [Abu Bakar]  ← assembles threading layer
 
 Phase 5 — Top level
-  15. job_executor              [Furqan]     ← needs unix_socket ready
-  16. process_spawner           [Furqan]
-  17. scheduler                 [Furqan]     ← assembles everything
+  18. job_executor              [Furqan]     ← needs unix_socket ready
+  19. process_spawner           [Furqan]
+  20. scheduler                 [Furqan]     ← assembles everything
+
+Phase 6 — Umbrella headers + top-level interface
+  21. scheduler_module.h        [Furqan]     ← header only
+  22. ipc_module.h              [Abdullah]   ← header only
+  23. threading_module.h        [Abu Bakar]  ← header only
+  24. os_layer.h                [Furqan]     ← header only, final step
 ```
 
 ---
@@ -127,38 +184,49 @@ Phase 5 — Top level
 ## Full Dependency Graph
 
 ```
-scheduler
-├── timer
-│   └── signal_handler
-│       └── process_manager
-│           └── process_registry
-├── job_executor
-│   └── ipc_manager
-│       ├── unix_socket     → libpq → PostgreSQL
-│       ├── fifo            → ipc_types.h
-│       └── shared_memory   → ipc_types.h
-└── process_spawner
-    ├── process_registry
-    └── ipc_types.h
+os_layer.h
+├── scheduler_module.h
+│   └── scheduler
+│       ├── timer
+│       │   └── signal_handler
+│       │       └── process_manager
+│       │           └── process_registry
+│       ├── job_executor
+│       │   └── ipc_manager
+│       │       ├── unix_socket     → libpq → PostgreSQL
+│       │       ├── fifo            → ipc_types.h
+│       │       └── shared_memory   → ipc_types.h + shm_layout.h
+│       └── process_spawner
+│           ├── process_registry
+│           └── ipc_types.h
+├── ipc_module.h
+│   └── ipc_manager (see above)
+└── threading_module.h
+    └── thread_pool
+        ├── worker
+        │   ├── connection_gate
+        │   │   └── sync.h
+        │   └── session_manager
+        │       └── sync.h
+        └── sync.h
 
-thread_pool
-├── worker
-│   ├── connection_gate
-│   │   └── sync.h
-│   └── session_manager
-│       └── sync.h
-└── sync.h
+memory/ (internal, not in os_layer.h)
+├── mmap_handler    ← used by shared_memory, job_executor
+└── mlock_guard     ← used by session_manager, auth_manager
 ```
 
 ---
 
 ## Cross-Module Coordination Points
 
-| Dependency                                               | Modules Involved                                | Who Waits | Who Delivers |
-| -------------------------------------------------------- | ----------------------------------------------- | --------- | ------------ |
-| `unix_socket` stub                                       | `job_executor` ← `unix_socket`                  | Furqan    | Abdullah     |
-| `shm` init before thread pool                            | `shared_memory` ← `thread_pool`                 | Abu Bakar | Abdullah     |
-| `session_manager.getActiveCount()` feeds shm             | `session_manager` → `SharedStatusTable`         | Abdullah  | Abu Bakar    |
-| `AuthManager` stub needed for `worker`                   | `worker` ← `AuthManager`                        | Abu Bakar | Furqan       |
-| Threading join before IPC teardown                       | `thread_pool` shutdown → `ipc_manager` teardown | Abdullah  | Abu Bakar    |
-| `StatusTableUpdater` broadcasts to `thread_pool` CondVar | `scheduler` → `thread_pool`                     | Abu Bakar | Furqan       |
+| Dependency | Modules Involved | Who Waits | Who Delivers |
+|---|---|---|---|
+| `unix_socket` stub | `job_executor` ← `unix_socket` | Furqan | Abdullah |
+| `shm_layout.h` stable | `shared_memory` + AI agents ← `shm_layout.h` | Abdullah, AI team | Abdullah |
+| `shm` init before thread pool | `shared_memory` ← `thread_pool` | Abu Bakar | Abdullah |
+| `session_manager.getActiveCount()` feeds shm | `session_manager` → `SharedStatusTable` | Abdullah | Abu Bakar |
+| `AuthManager` stub needed for `worker` | `worker` ← `AuthManager` | Abu Bakar | Furqan |
+| Threading join before IPC teardown | `thread_pool` shutdown → `ipc_manager` teardown | Abdullah | Abu Bakar |
+| `StatusTableUpdater` broadcasts to `thread_pool` CondVar | `scheduler` → `thread_pool` | Abu Bakar | Furqan |
+| `mmap_handler.msync()` called after shm write | `mmap_handler` ← `scheduler` status update | Furqan | Shared |
+| `mlock_guard` available before session table init | `mlock_guard` ← `session_manager` | Abu Bakar | Shared |
