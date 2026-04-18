@@ -10,7 +10,7 @@ private:
     FILE *logFile;
     pthread_mutex_t mutex;
 
-    Logger() : log_file(nullptr)
+    Logger() : logFile(nullptr)
     {
         pthread_mutex_init(&mutex, nullptr);
     }
