@@ -5,7 +5,6 @@
 #include <cerrno>
 #include <cstring>
 
-namespace os_layer {
 namespace memory {
 
 MmapHandler::MmapHandler() 
@@ -84,4 +83,3 @@ bool MmapHandler::isValid() const {
 }
 
 } // namespace memory
-} // namespace os_layer

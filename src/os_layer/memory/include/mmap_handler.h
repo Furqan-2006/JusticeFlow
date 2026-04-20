@@ -5,7 +5,6 @@
 #include <string>
 #include "../../../common/constants.h"
 
-namespace os_layer {
 namespace memory {
 
 class MmapHandler {
@@ -42,6 +41,5 @@ public:
 };
 
 } // namespace memory
-} // namespace os_layer
 
 #endif // MMAP_HANDLER_H
