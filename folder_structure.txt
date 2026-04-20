@@ -75,6 +75,7 @@ justiceflow/
 |   │   │   |   ├── thread_pool.h
 |   │   │   |   ├── worker.h
 |   │   │   |   ├── session_manager.h
+|   |   |   |   ├── connection_gate.h
 |   │   │   |   └── sync.h               // mutex, sem, cond wrappers
 |   |   |   ├── src/
 |   │   │       ├── thread_pool.cpp
