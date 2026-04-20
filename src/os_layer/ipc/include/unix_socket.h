@@ -6,7 +6,6 @@
 #include <libpq-fe.h> 
 #include "../../../common/constants.h" // Includes JusticeFlow::ResultCode
 
-namespace os_layer {
 namespace ipc {
 
 class UnixSocket {
@@ -31,6 +30,5 @@ public:
 };
 
 } // namespace ipc
-} // namespace os_layer
 
 #endif // UNIX_SOCKET_H

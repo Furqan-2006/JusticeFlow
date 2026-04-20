@@ -4,7 +4,6 @@
 #include <pthread.h>
 #include <time.h>
 
-namespace os_layer {
 namespace ipc {
 
 // Contract Page 13: Live Agent Status Table
@@ -27,6 +26,5 @@ struct SharedStatusTable {
 };
 
 } // namespace ipc
-} // namespace os_layer
 
 #endif // SHM_LAYOUT_H

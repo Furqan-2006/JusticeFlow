@@ -9,7 +9,6 @@ const std::string HOTSPOT_FIFO_PATH = "/tmp/jf_hotspot.fifo";
 const std::string PRIORITY_FIFO_PATH = "/tmp/jf_priority.fifo";
 const std::string WORKLOAD_FIFO_PATH = "/tmp/jf_workload.fifo";
 
-namespace os_layer {
 namespace ipc {
 
 IpcManager::IpcManager() : is_initialized(false) {
@@ -80,4 +79,3 @@ Fifo* IpcManager::getWorkloadFifo() const {
 }
 
 } // namespace ipc
-} // namespace os_layer

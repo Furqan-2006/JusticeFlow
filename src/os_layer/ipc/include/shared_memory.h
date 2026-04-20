@@ -5,7 +5,6 @@
 #include <cstddef>
 #include "../../../common/constants.h"
 
-namespace os_layer {
 namespace ipc {
 
 class SharedMemory {
@@ -37,6 +36,5 @@ public:
 };
 
 } // namespace ipc
-} // namespace os_layer
 
 #endif // SHARED_MEMORY_H

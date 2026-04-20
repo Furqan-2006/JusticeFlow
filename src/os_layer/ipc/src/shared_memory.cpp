@@ -8,7 +8,6 @@
 #include <cstring>
 #include <cerrno>
 
-namespace os_layer {
 namespace ipc {
 
 SharedMemory::SharedMemory(const std::string& name, size_t size)
@@ -99,4 +98,3 @@ void SharedMemory::destroy() {
 }
 
 } // namespace ipc
-} // namespace os_layer

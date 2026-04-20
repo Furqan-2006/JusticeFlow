@@ -5,7 +5,6 @@
 #include <sys/types.h>
 #include "../../../common/constants.h"
 
-namespace os_layer {
 namespace ipc {
 
 class Fifo {
@@ -44,6 +43,5 @@ public:
 };
 
 } // namespace ipc
-} // namespace os_layer
 
 #endif // FIFO_H

@@ -6,7 +6,6 @@
 #include "../../../common/constants.h"
 #include <memory>
 
-namespace os_layer {
 namespace ipc {
 
 class IpcManager {
@@ -38,6 +37,5 @@ public:
 };
 
 } // namespace ipc
-} // namespace os_layer
 
 #endif // IPC_MANAGER_H

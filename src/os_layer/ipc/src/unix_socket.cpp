@@ -1,7 +1,6 @@
 #include "../include/unix_socket.h"
 #include "../../../common/logger.h"
 
-namespace os_layer {
 namespace ipc {
 
 UnixSocket::UnixSocket(const std::string& connectionString) 
@@ -54,4 +53,3 @@ void UnixSocket::unlock() {
 }
 
 } // namespace ipc
-} // namespace os_layer
