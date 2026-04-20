@@ -5,10 +5,13 @@ namespace os_layer {
 namespace ipc {
 
 UnixSocket::UnixSocket(const std::string& connectionString) 
-    : conn(nullptr), conn_string(connectionString) {}
+    : conn(nullptr), conn_string(connectionString) {
+    pthread_mutex_init(&db_mutex, nullptr); // Initiialize mutex
+}
 
 UnixSocket::~UnixSocket() {
     disconnect();
+    pthread_mutex_destroy(&db_mutex); // Destroy Mutex
 }
 
 // Changed JFResult to JusticeFlow::ResultCode
@@ -40,6 +43,14 @@ bool UnixSocket::isConnected() const {
 
 PGconn* UnixSocket::get() const {
     return conn;
+}
+
+void UnixSocket::lock() {
+    pthread_mutex_lock(&db_mutex);
+}
+
+void UnixSocket::unlock() {
+    pthread_mutex_unlock(&db_mutex);
 }
 
 } // namespace ipc

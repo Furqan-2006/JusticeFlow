@@ -21,6 +21,7 @@ struct AgentStatus {
 // Contract Page 13: Full shared memory segment layout
 struct SharedStatusTable {
     pthread_mutex_t mutex; // Protects the entire struct from race conditions
+    pthread_cond_t cond_var;// Notifies threads when the AI agents finish
     int active_sessions;
     AgentStatus agents[3]; // [0]=hotspot [1]=priority [2]=workload
 };
