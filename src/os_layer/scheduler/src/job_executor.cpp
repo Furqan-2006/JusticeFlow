@@ -1,15 +1,23 @@
 #include "../include/job_executor.h"
+#include "../../ipc/include/ipc_manager.h"
 #include "common/logger.h"
 
-// Note: actual libpq calls would go in execute()
 void ExpireWarrantsJob::execute()
 {
     Logger::info("Executing ExpireWarrantsJob...");
-    // PQexec(conn, "UPDATE warrants SET status='EXPIRED' WHERE expiry_date < NOW()");
+    JusticeFlow::ResultCode res = ipc::IpcManager::getInstance().executeQuery("UPDATE warrants SET status='EXPIRED' WHERE expiry_date < NOW()");
+    if (res != JusticeFlow::ResultCode::OK)
+    {
+        Logger::error("ExpireWarrantsJob failed!");
+    }
 }
 
 void CheckDatabaseHealthJob::execute()
 {
     Logger::debug("Executing CheckDatabaseHealthJob...");
-    // PQexec(conn, "SELECT 1");
+    JusticeFlow::ResultCode res = ipc::IpcManager::getInstance().executeQuery("SELECT 1");
+    if (res != JusticeFlow::ResultCode::OK)
+    {
+        Logger::error("Database health check failed! DB unreachable.");
+    }
 }

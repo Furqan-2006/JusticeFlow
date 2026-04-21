@@ -10,23 +10,23 @@ ProcessManager &ProcessManager::getInstance()
     return instance;
 }
 
-ResultCode ProcessManager::reapOne(pid_t pid, ProcessAction &out_action)
+JusticeFlow::ResultCode ProcessManager::reapOne(pid_t pid, ProcessAction &out_action)
 {
     out_action = ProcessAction::NONE;
     int status;
 
     pid_t result = waitpid(pid, &status, WNOHANG);
 
-    if (result = 0)
+    if (result == 0)
     {
-        return ResultCode::INVALID_STATE;
+        return JusticeFlow::ResultCode::INVALID_STATE;
     }
     else if (result < 0)
     {
-        return ResultCode::NOT_FOUND;
+        return JusticeFlow::ResultCode::NOT_FOUND;
     }
 
-    ProcessRegistry &registry = ProcessRegistry::getProcessRegistry();
+    ProcessRegistry &registry = ProcessRegistry::getInstance();
     registry.updateState(pid, ProcessState::REAPED);
 
     bool clean_exit = (WIFEXITED(status) && WEXITSTATUS(status) == 0);
@@ -34,13 +34,15 @@ ResultCode ProcessManager::reapOne(pid_t pid, ProcessAction &out_action)
     if (!clean_exit)
     {
         ProcessRecord record;
-        if (registry_.getRecord(pid, record) == ResultCode::OK)
+        if (registry.getRecord(pid, record) == JusticeFlow::ResultCode::OK)
         {
             record.restart_count++;
 
-            char log_buff[256];
-            std::snprintf(log_buff, sizeof(log_buff), "Process %s (PID %d) exited abnormally. Restart count: %d/%d", record.agent_name, pid, record.restart_count, MAX_RESTARTS);
-            Logger::error(log_buff);
+            char log_buf[256];
+            std::snprintf(log_buf, sizeof(log_buf),
+                          "Process %s (PID: %d) exited abnormally. Restart count: %d/%d",
+                          record.agent_name, pid, record.restart_count, MAX_RESTARTS);
+            Logger::error(log_buf);
 
             registry.registerProcess(pid, record);
 
@@ -56,25 +58,25 @@ ResultCode ProcessManager::reapOne(pid_t pid, ProcessAction &out_action)
     }
     else
     {
-        char log_buff[128];
-        std::snprintf(log_buff, sizeof(log_buff), "Process PID: %d exited cleanly.", pid);
-        Logger::info(log_buff);
+        char log_buf[128];
+        std::snprintf(log_buf, sizeof(log_buf), "Process PID: %d exited cleanly.", pid);
+        Logger::info(log_buf);
     }
 
-    return ResultCode::OK;
+    return JusticeFlow::ResultCode::OK;
 }
 
-ResultCode ProcessManager::reapAll()
+JusticeFlow::ResultCode ProcessManager::reapAll()
 {
-    ProcessRegistry &registry = ProcessRegistry::getProcessRegistry();
+    ProcessRegistry &registry = ProcessRegistry::getInstance();
     std::vector<pid_t> pids;
 
-    if (registry.getAllPids(pids) != ResultCode::OK)
+    if (registry.getAllPids(pids) != JusticeFlow::ResultCode::OK)
     {
-        return ResultCode::INVALID_STATE;
+        return JusticeFlow::ResultCode::INVALID_STATE;
     }
 
-    Logger::info("ProcessManager: Reaping all the processes for shutdown...");
+    Logger::info("ProcessManager: Reaping all processes for shutdown...");
 
     for (pid_t pid : pids)
     {
@@ -84,5 +86,6 @@ ResultCode ProcessManager::reapAll()
             registry.updateState(pid, ProcessState::REAPED);
         }
     }
-    return ResultCode::OK;
+
+    return JusticeFlow::ResultCode::OK;
 }

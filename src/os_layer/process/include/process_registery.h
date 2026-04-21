@@ -1,11 +1,11 @@
 #pragma once
 
 #include <sys/types.h>
-#include <pthread.h>
 #include <unordered_map>
 #include <vector>
 #include <cstring>
-#include "../../../common/constants.h"
+#include "common/constants.h"
+#include "../../threading/include/sync.h"
 
 enum class ProcessState
 {
@@ -36,18 +36,16 @@ class ProcessRegistry
 {
 private:
     std::unordered_map<pid_t, ProcessRecord> registry_;
-    pthread_mutex_t mutex_;
+    Mutex mutex_; // Abu Bakar's Mutex wrapper
 
-    ProcessRegistry();
-    ~ProcessRegistry();
+    ProcessRegistry() = default;
+    ~ProcessRegistry() = default;
 
     ProcessRegistry(const ProcessRegistry &) = delete;
     ProcessRegistry &operator=(const ProcessRegistry &) = delete;
-    ProcessRegistry(ProcessRegistry &&) = delete;
-    ProcessRegistry &operator=(ProcessRegistry &&) = delete;
 
 public:
-    static ProcessRegistry &getProcessRegistry();
+    static ProcessRegistry &getInstance();
 
     JusticeFlow::ResultCode registerProcess(pid_t pid, const ProcessRecord &record);
     JusticeFlow::ResultCode updateState(pid_t pid, ProcessState new_state);

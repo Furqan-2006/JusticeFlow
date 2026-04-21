@@ -1,28 +1,44 @@
 #include "os_layer/scheduler/include/scheduler.h"
 #include "os_layer/scheduler/include/timer.h"
-#include "common/logger.h"
+#include "../include/process_spawner.h"
 
-// Cross-module dependencies (Assume these stubs exist until Abdullah/Abu Bakar/Shared push their code)
-#include "os_layer/ipc/include/ipc_module.h"        // For IpcManager::updateAgentStatus
-#include "../../memory/include/mmap_handler.h"   // For msync
-#include "os_layer/threading/include/thread_pool.h" // For CondVar broadcast
+#include "../../process/include/process_manager.h"
+#include "../../ipc/include/ipc_manager.h"
+#include "../..//threading/include/thread_pool.h"
+#include "../../memory/include/mmap_handler.h"
+#include "common/logger.h"
 
 /* ==========================================
  * StatusTableUpdater Implementation
  * ========================================== */
 void StatusTableUpdater::onJobComplete(Job *job, JusticeFlow::ResultCode result)
 {
-    // In a full implementation, we'd cast the Job to AgentJob to get specific details.
-    Logger::debug("StatusTableUpdater: Agent job completed. Updating SHM.");
+    AgentJob *agent_job = dynamic_cast<AgentJob *>(job);
 
-    // 1. Update the Shared Memory via Abdullah's IPC Manager
-    // IpcManager::getInstance().updateAgentStatus(...);
+    if (agent_job != nullptr)
+    {
+        Logger::debug("StatusTableUpdater: Agent job completed. Reading FIFO...");
 
-    // 2. Flush the SHM write to ensure other processes see it immediately (Shared requirement)
-    // MmapHandler::msync(shm_address, shm_size);
+        AgentStatusMessage msg;
+        int agent_idx = agent_job->getAgentIndex();
 
-    // 3. Broadcast to Abu Bakar's thread pool CondVar that new AI data is ready
-    // ThreadPool::broadcastAiUpdate();
+        // 1. Read the status from the agent's FIFO via IPC Manager
+        if (ipc::IpcManager::getInstance().readAgentStatus(agent_idx, msg) == JusticeFlow::ResultCode::OK)
+        {
+
+            AgentStatus new_status;
+            std::strncpy(new_status.agent_name, msg.agent_name, sizeof(new_status.agent_name) - 1);
+            std::strncpy(new_status.error_detail, msg.error_detail, sizeof(new_status.error_detail) - 1);
+            new_status.current_status = msg.status_code;
+            new_status.last_updated = time(nullptr);
+
+            // 2. Update Shared Memory via IPC Manager
+            ipc::IpcManager::getInstance().updateAgentStatus(agent_idx, new_status);
+
+            // 3. Broadcast to Abu Bakar's Thread Pool
+            ThreadPool::getInstance().broadcastAiUpdate();
+        }
+    }
 }
 
 /* ==========================================
@@ -42,19 +58,24 @@ Scheduler &Scheduler::getInstance()
     return instance;
 }
 
-SchedulerState Scheduler::getState() const { return state; }
+SchedulerState Scheduler::getState() const
+{
+    return state;
+}
 
 void Scheduler::setState(SchedulerState new_state)
 {
     state = new_state;
     if (state == SchedulerState::DRAINING)
     {
-        Logger::info("Scheduler entering DRAINING state. Disarming timer and initiating teardown.");
-        Timer::disarm();
+        Logger::info("Scheduler entering DRAINING state. Initiating teardown.");
 
-        // Initiate graceful shutdown logic here:
-        // 1. ThreadPool::shutdown()
-        // 2. IpcManager::getInstance().teardown()
+        Timer::disarm();
+        ProcessManager::getInstance().reapAll();
+        ThreadPool::getInstance().shutdown();
+        ipc::IpcManager::getInstance().disconnectDatabase();
+
+        state = SchedulerState::STOPPED;
     }
 }
 
@@ -86,7 +107,6 @@ void Scheduler::tick()
             job->execute();
             job->next_fire_tick = current_tick + job->interval_ticks;
 
-            // Notify observers (e.g., StatusTableUpdater)
             for (auto obs : observers)
             {
                 obs->onJobComplete(job, JusticeFlow::ResultCode::OK);
