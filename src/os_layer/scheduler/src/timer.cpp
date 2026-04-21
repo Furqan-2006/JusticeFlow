@@ -1,6 +1,8 @@
 #include "../include/timer.h"
 #include "common/logger.h"
 
+#define _POSIX_C_SOURCE 199309L
+
 #include <sys/time.h>
 #include <time.h>
 #include <cstddef>
@@ -25,7 +27,7 @@ namespace Timer
         }
 
         current_interval = interval_seconds;
-        clock_gettime(clock_MONOTONIC, &expected_next_tick);
+        clock_gettime(CLOCK_MONOTONIC, &expected_next_tick);
         expected_next_tick.tv_sec += interval_seconds;
 
         return JusticeFlow::ResultCode::OK;
