@@ -1,5 +1,6 @@
 #pragma once
-#include "os_layer/scheduler/include/scheduler.h"
+
+#include "scheduler.h"
 #include "common/ipc_types.h"
 #include <string>
 
