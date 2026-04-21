@@ -25,7 +25,13 @@ public:
 // Observer interface for job completion/status updates
 class JobObserver {
 public:
-    virtual void onJobComplete(Job* job, ResultCode result) = 0;
+    virtual void onJobComplete(Job* job, JusticeFlow::ResultCode result) = 0;
+};
+
+// Concrete observer that updates SHM and wakes the ThreadPool
+class StatusTableUpdater : public JobObserver {
+public:
+    void onJobComplete(Job* job, JusticeFlow::ResultCode result) override;
 };
 
 class Scheduler {
@@ -42,6 +48,9 @@ private:
 
     Scheduler();
     ~Scheduler() = default;
+
+    Scheduler(const Scheduler&) = delete;
+    Scheduler& operator=(const Scheduler&) = delete;
 
 public:
     static Scheduler& getInstance();
