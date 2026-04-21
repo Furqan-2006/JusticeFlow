@@ -1,5 +1,4 @@
-#ifndef SHARED_MEMORY_H
-#define SHARED_MEMORY_H
+#pragma once
 
 #include <string>
 #include <cstddef>
@@ -36,5 +35,3 @@ public:
 };
 
 } // namespace ipc
-
-#endif // SHARED_MEMORY_H

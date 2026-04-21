@@ -1,5 +1,4 @@
-#ifndef SHM_LAYOUT_H
-#define SHM_LAYOUT_H
+#pragma once
 
 #include <pthread.h>
 #include <time.h>
@@ -27,4 +26,3 @@ struct SharedStatusTable {
 
 } // namespace ipc
 
-#endif // SHM_LAYOUT_H

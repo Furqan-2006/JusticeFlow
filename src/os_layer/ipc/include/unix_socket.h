@@ -1,5 +1,4 @@
-#ifndef UNIX_SOCKET_H
-#define UNIX_SOCKET_H
+#pragma once
 
 #include <pthread.h> // adding this library to ensure thread safety
 #include <string>
@@ -31,4 +30,3 @@ public:
 
 } // namespace ipc
 
-#endif // UNIX_SOCKET_H

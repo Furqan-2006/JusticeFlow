@@ -1,5 +1,4 @@
-#ifndef IPC_MANAGER_H
-#define IPC_MANAGER_H
+#pragma once
 
 #include "unix_socket.h"
 #include "fifo.h"
@@ -37,5 +36,3 @@ public:
 };
 
 } // namespace ipc
-
-#endif // IPC_MANAGER_H

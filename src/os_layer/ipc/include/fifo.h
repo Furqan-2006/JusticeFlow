@@ -1,5 +1,4 @@
-#ifndef FIFO_H
-#define FIFO_H
+#pragma once
 
 #include <string>
 #include <sys/types.h>
@@ -43,5 +42,3 @@ public:
 };
 
 } // namespace ipc
-
-#endif // FIFO_H
