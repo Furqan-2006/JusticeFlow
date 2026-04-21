@@ -6,7 +6,6 @@
 #include <cerrno>
 #include <cstring>
 
-namespace os_layer {
 namespace ipc {
 
 Fifo::Fifo(const std::string& path) : fifo_path(path), fd(-1), is_reader(false) {}
@@ -86,4 +85,3 @@ void Fifo::destroy() {
 }
 
 } // namespace ipc
-} // namespace os_layer

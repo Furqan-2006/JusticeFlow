@@ -1,3 +1,4 @@
+#include "../include/shm_layout.h"
 #include "../include/shared_memory.h"
 #include "../../../common/logger.h"
 #include <sys/mman.h>
@@ -7,7 +8,6 @@
 #include <cstring>
 #include <cerrno>
 
-namespace os_layer {
 namespace ipc {
 
 SharedMemory::SharedMemory(const std::string& name, size_t size)
@@ -44,6 +44,22 @@ JusticeFlow::ResultCode SharedMemory::create() {
         Logger::error(("[OS][IPC] mmap (create) failed: " + std::string(strerror(errno))).c_str());
         return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
     }
+    // Cast the raw memory to our struct
+    SharedStatusTable* table = static_cast<SharedStatusTable*>(mapped_addr);
+
+    // Initialize Process-Shared Mutex
+    pthread_mutexattr_t mutex_attr;
+    pthread_mutexattr_init(&mutex_attr);
+    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&table->mutex, &mutex_attr);
+    pthread_mutexattr_destroy(&mutex_attr);
+
+    // Initialize Process-Shared Condition Variable
+    pthread_condattr_t cond_attr;
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
+    pthread_cond_init(&table->cond_var, &cond_attr);
+    pthread_condattr_destroy(&cond_attr);
 
     is_creator = true;
     Logger::info(("[OS][IPC] Shared Memory created: " + shm_name).c_str());
@@ -82,4 +98,3 @@ void SharedMemory::destroy() {
 }
 
 } // namespace ipc
-} // namespace os_layer
