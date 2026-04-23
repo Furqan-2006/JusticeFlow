@@ -1,38 +1,43 @@
-#pragma once
+#ifndef IPC_MANAGER_H
+#define IPC_MANAGER_H
 
 #include "unix_socket.h"
 #include "fifo.h"
+#include "shared_memory.h"
 #include "../../../common/constants.h"
-#include <memory>
+#include "../../../common/ipc_types.h"
 
 namespace ipc {
 
 class IpcManager {
 private:
-    std::unique_ptr<UnixSocket> db_socket;
-    std::unique_ptr<Fifo> hotspot_fifo;
-    std::unique_ptr<Fifo> priority_fifo;
-    std::unique_ptr<Fifo> workload_fifo;
+    UnixSocket db_socket;
+    Fifo fifo_handler;
+    SharedMemory shm_handler;
 
-    bool is_initialized;
+    // Private Constructor for Singleton
+    IpcManager();
 
 public:
-    IpcManager();
-    ~IpcManager();
+    // Singleton Instance
+    static IpcManager& getInstance() {
+        static IpcManager instance;
+        return instance;
+    }
 
-    // Initializes all IPC mechanisms (Socket + 3 FIFOs)
-    JusticeFlow::ResultCode initializeAll();
+    // Delete copy constructor (Singleton rule)
+    IpcManager(const IpcManager&) = delete;
+    void operator=(const IpcManager&) = delete;
 
-    // Shuts down and cleans up all IPC mechanisms
-    void shutdownAll();
-
-    // Get the database socket connection
-    UnixSocket* getDatabaseSocket() const;
-
-    // Get specific FIFOs for AI Agents
-    Fifo* getHotspotFifo() const;
-    Fifo* getPriorityFifo() const;
-    Fifo* getWorkloadFifo() const;
+    // High-Level Interface
+    JusticeFlow::ResultCode connectDatabase();
+    void disconnectDatabase();
+    JusticeFlow::ResultCode executeQuery(const std::string& query, std::vector<std::vector<std::string>>& results);
+    
+    JusticeFlow::ResultCode readAgentStatus(int agent_index, AgentStatusMessage& out_msg);
+    JusticeFlow::ResultCode updateAgentStatus(int agent_index, const AgentStatus& status);
+    SharedStatusTable* getStatusTable();
 };
 
 } // namespace ipc
+#endif

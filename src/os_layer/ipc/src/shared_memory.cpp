@@ -1,22 +1,22 @@
-#include "../include/shm_layout.h"
 #include "../include/shared_memory.h"
 #include "../../../common/logger.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <cstring>
 #include <cerrno>
+#include <cstring>
 
 namespace ipc {
 
-SharedMemory::SharedMemory(const std::string& name, size_t size)
-    : shm_name(name), shm_fd(-1), shm_size(size), mapped_addr(MAP_FAILED), is_creator(false) {}
+// Constructor: Size is no longer needed, it's statically typed to the struct size
+SharedMemory::SharedMemory(const std::string& name)
+    : shm_name(name), shm_fd(-1), mapped_table(nullptr), is_creator(false) {}
 
 SharedMemory::~SharedMemory() {
-    if (mapped_addr != MAP_FAILED) {
-        munmap(mapped_addr, shm_size);
-        mapped_addr = MAP_FAILED;
+    if (mapped_table != nullptr && mapped_table != MAP_FAILED) {
+        munmap(mapped_table, sizeof(SharedStatusTable));
+        mapped_table = nullptr;
     }
     if (shm_fd != -1) {
         close(shm_fd);
@@ -25,41 +25,30 @@ SharedMemory::~SharedMemory() {
 }
 
 JusticeFlow::ResultCode SharedMemory::create() {
-    // 1. Create the POSIX shared memory object
     shm_fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
         Logger::error(("[OS][IPC] shm_open (create) failed: " + std::string(strerror(errno))).c_str());
         return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
     }
 
-    // 2. Set the size of the memory segment
-    if (ftruncate(shm_fd, shm_size) == -1) {
-        Logger::error(("[OS][IPC] ftruncate failed: " + std::string(strerror(errno))).c_str());
-        return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
-    }
-
-    // 3. Map the memory into this process's address space
-    mapped_addr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (mapped_addr == MAP_FAILED) {
+    ftruncate(shm_fd, sizeof(SharedStatusTable));
+    
+    void* raw_ptr = mmap(NULL, sizeof(SharedStatusTable), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (raw_ptr == MAP_FAILED) {
         Logger::error(("[OS][IPC] mmap (create) failed: " + std::string(strerror(errno))).c_str());
         return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
     }
-    // Cast the raw memory to our struct
-    SharedStatusTable* table = static_cast<SharedStatusTable*>(mapped_addr);
+    
+    mapped_table = static_cast<SharedStatusTable*>(raw_ptr);
 
-    // Initialize Process-Shared Mutex
-    pthread_mutexattr_t mutex_attr;
-    pthread_mutexattr_init(&mutex_attr);
-    pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED);
-    pthread_mutex_init(&table->mutex, &mutex_attr);
-    pthread_mutexattr_destroy(&mutex_attr);
-
-    // Initialize Process-Shared Condition Variable
-    pthread_condattr_t cond_attr;
-    pthread_condattr_init(&cond_attr);
-    pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
-    pthread_cond_init(&table->cond_var, &cond_attr);
-    pthread_condattr_destroy(&cond_attr);
+    // CRITICAL FIX: ROBUST PROCESS-SHARED MUTEX
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST); 
+    
+    pthread_mutex_init(&mapped_table->mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
 
     is_creator = true;
     Logger::info(("[OS][IPC] Shared Memory created: " + shm_name).c_str());
@@ -75,19 +64,17 @@ JusticeFlow::ResultCode SharedMemory::attach() {
     }
 
     // 2. Map the memory into this process's address space
-    mapped_addr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (mapped_addr == MAP_FAILED) {
+    void* raw_ptr = mmap(NULL, sizeof(SharedStatusTable), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (raw_ptr == MAP_FAILED) {
         Logger::error(("[OS][IPC] mmap (attach) failed: " + std::string(strerror(errno))).c_str());
         return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
     }
+    
+    mapped_table = static_cast<SharedStatusTable*>(raw_ptr);
 
     is_creator = false;
     Logger::info(("[OS][IPC] Shared Memory attached: " + shm_name).c_str());
     return JusticeFlow::ResultCode::OK;
-}
-
-void* SharedMemory::getPointer() const {
-    return (mapped_addr == MAP_FAILED) ? nullptr : mapped_addr;
 }
 
 void SharedMemory::destroy() {
@@ -95,6 +82,10 @@ void SharedMemory::destroy() {
         shm_unlink(shm_name.c_str()); // Tells Linux to delete the RAM block
         Logger::info(("[OS][IPC] Shared Memory destroyed: " + shm_name).c_str());
     }
+}
+
+SharedStatusTable* SharedMemory::getTable() const {
+    return (mapped_table == MAP_FAILED) ? nullptr : mapped_table;
 }
 
 } // namespace ipc

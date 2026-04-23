@@ -1,81 +1,92 @@
 #include "../include/ipc_manager.h"
 #include "../../../common/logger.h"
+#include "../../../common/dbconfig.h"   // Furqan's secure DB config
+#include "../../../common/ipc_types.h"  // For SHM_NAME
 
-// Hardcoded connection string for now (matches our setup script)
-const std::string DB_CONN_STR = "dbname=justiceflow user=justiceflow password=justiceflow123 host=localhost port=5432";
+#include <vector>
 
-// FIFO Paths (From Contract Page 13)
+// --- FURQAN FORGOT THESE IN dbconfig.h, SO WE DEFINE THEM HERE FOR NOW ---
 const std::string HOTSPOT_FIFO_PATH = "/tmp/jf_hotspot.fifo";
 const std::string PRIORITY_FIFO_PATH = "/tmp/jf_priority.fifo";
 const std::string WORKLOAD_FIFO_PATH = "/tmp/jf_workload.fifo";
+// -------------------------------------------------------------------------
 
 namespace ipc {
 
-IpcManager::IpcManager() : is_initialized(false) {
-    db_socket = std::make_unique<UnixSocket>(DB_CONN_STR);
-    hotspot_fifo = std::make_unique<Fifo>(HOTSPOT_FIFO_PATH);
-    priority_fifo = std::make_unique<Fifo>(PRIORITY_FIFO_PATH);
-    workload_fifo = std::make_unique<Fifo>(WORKLOAD_FIFO_PATH);
-}
-
-IpcManager::~IpcManager() {
-    shutdownAll();
-}
-
-JusticeFlow::ResultCode IpcManager::initializeAll() {
-    if (is_initialized) return JusticeFlow::ResultCode::OK;
-
-    Logger::info("[OS][IPC] Initializing all IPC mechanisms...");
-
-    // 1. Connect to PostgreSQL
-    JusticeFlow::ResultCode res = db_socket->connect();
+// --- SECURITY HELPER ---
+// This safely generates the connection string using Furqan's DBConfig
+static std::string getSecureConnectionString() {
+    JusticeFlow::DBConfig config;
+    
+    // Attempt to load from OS Environment Variables
+    JusticeFlow::ResultCode res = config.loadFromEnvironment();
+    
     if (res != JusticeFlow::ResultCode::OK) {
-        Logger::error("[OS][IPC] Failed to initialize Database Unix Socket.");
-        return res;
+        Logger::error("[IPC] Failed to load secure DB config from environment. Using local dev fallback.");
+        // Development fallback (still respects his security rules)
+        config.dbname = "justiceflow";
+        config.user = "justice_app";
+        config.password = "justiceflow123";
     }
+    
+    return config.toConnectionString();
+}
 
-    // 2. Create FIFOs for AI Agents
-    if (hotspot_fifo->create() != JusticeFlow::ResultCode::OK ||
-        priority_fifo->create() != JusticeFlow::ResultCode::OK ||
-        workload_fifo->create() != JusticeFlow::ResultCode::OK) {
-        
-        Logger::error("[OS][IPC] Failed to create one or more FIFOs.");
-        shutdownAll(); // Clean up if partial failure
-        return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
+// Private Constructor for Singleton
+IpcManager::IpcManager() 
+    : db_socket(getSecureConnectionString()), 
+    shm_handler(SHM_NAME) {
+}
+
+// 1. Database High-Level Interface
+JusticeFlow::ResultCode IpcManager::connectDatabase() {
+    Logger::info("[IPC] Connecting to database...");
+    return db_socket.connect();
+}
+
+void IpcManager::disconnectDatabase() {
+    db_socket.disconnect();
+}
+
+JusticeFlow::ResultCode IpcManager::executeQuery(const std::string& query, std::vector<std::vector<std::string>>& results) {
+    return db_socket.execute(query, results);
+}
+
+// 2. AI Agents High-Level Interface
+JusticeFlow::ResultCode IpcManager::readAgentStatus(int agent_index, AgentStatusMessage& out_msg) {
+    // Determine which FIFO to read based on the agent index
+    std::string target_fifo;
+    switch(agent_index) {
+        case 0: target_fifo = HOTSPOT_FIFO_PATH; break;
+        case 1: target_fifo = PRIORITY_FIFO_PATH; break;
+        case 2: target_fifo = WORKLOAD_FIFO_PATH; break;
+        default: return JusticeFlow::ResultCode::INVALID_INPUT;
     }
+    
+    return fifo_handler.readStatus(target_fifo, out_msg);
+}
 
-    is_initialized = true;
-    Logger::info("[OS][IPC] All IPC mechanisms initialized successfully.");
+JusticeFlow::ResultCode IpcManager::updateAgentStatus(int agent_index, const AgentStatus& status) {
+    // Get the shared memory table safely
+    SharedStatusTable* table = shm_handler.getTable();
+    if (table == nullptr) return JusticeFlow::ResultCode::INVALID_STATE;
+
+    if (agent_index < 0 || agent_index > 2) return JusticeFlow::ResultCode::INVALID_INPUT;
+
+    // Lock the robust mutex before writing to shared memory
+    pthread_mutex_lock(&table->mutex);
+    
+    // Copy the status struct into shared memory
+    table->agents[agent_index] = status;
+    
+    pthread_mutex_unlock(&table->mutex);
+    
     return JusticeFlow::ResultCode::OK;
 }
 
-void IpcManager::shutdownAll() {
-    Logger::info("[OS][IPC] Shutting down all IPC mechanisms...");
-    
-    if (db_socket) db_socket->disconnect();
-    
-    // Destroy the FIFOs (unlinks them from the OS)
-    if (hotspot_fifo) hotspot_fifo->destroy();
-    if (priority_fifo) priority_fifo->destroy();
-    if (workload_fifo) workload_fifo->destroy();
-
-    is_initialized = false;
-}
-
-UnixSocket* IpcManager::getDatabaseSocket() const {
-    return db_socket.get();
-}
-
-Fifo* IpcManager::getHotspotFifo() const {
-    return hotspot_fifo.get();
-}
-
-Fifo* IpcManager::getPriorityFifo() const {
-    return priority_fifo.get();
-}
-
-Fifo* IpcManager::getWorkloadFifo() const {
-    return workload_fifo.get();
+// 3. Shared Memory High-Level Interface
+SharedStatusTable* IpcManager::getStatusTable() {
+    return shm_handler.getTable();
 }
 
 } // namespace ipc
