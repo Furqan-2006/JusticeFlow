@@ -85,7 +85,7 @@ void SharedMemory::destroy() {
 }
 
 SharedStatusTable* SharedMemory::getTable() const {
-    return (mapped_table == MAP_FAILED) ? nullptr : mapped_table;
+    return mapped_table; 
 }
 
 } // namespace ipc

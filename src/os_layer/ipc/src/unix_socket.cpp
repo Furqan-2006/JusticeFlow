@@ -3,9 +3,15 @@
 
 namespace ipc {
 
-UnixSocket::UnixSocket(const std::string& connectionString) : conn(nullptr), conn_string(connectionString) {}
-UnixSocket::~UnixSocket() { disconnect(); }
+UnixSocket::UnixSocket(const std::string& connectionString) : conn(nullptr), conn_string(connectionString) {
+    pthread_mutex_init(&db_mutex, nullptr); // Initiialize mutex
+}
+UnixSocket::~UnixSocket() { 
+    disconnect(); 
+    pthread_mutex_destroy(&db_mutex); // Destroy Mutex
+}
 
+// Changed JFResult to JusticeFlow::ResultCode
 JusticeFlow::ResultCode UnixSocket::connect() {
     conn = PQconnectdb(conn_string.c_str());
     if (PQstatus(conn) != CONNECTION_OK) {
@@ -13,6 +19,7 @@ JusticeFlow::ResultCode UnixSocket::connect() {
         disconnect(); 
         return JusticeFlow::ResultCode::DB_ERROR;
     }
+    Logger::info("[OS][IPC] Connected to PostgreSQL via Unix Domain Socket.");
     return JusticeFlow::ResultCode::OK;
 }
 
@@ -20,6 +27,7 @@ void UnixSocket::disconnect() {
     if (conn != nullptr) {
         PQfinish(conn);
         conn = nullptr;
+        Logger::info("[OS][IPC] PostgreSQL connection closed.");
     }
 }
 
@@ -51,6 +59,14 @@ JusticeFlow::ResultCode UnixSocket::execute(const std::string& query, std::vecto
 
     PQclear(res); // Memory managed internally!
     return JusticeFlow::ResultCode::OK;
+}
+
+void UnixSocket::lock() {
+    pthread_mutex_lock(&db_mutex);
+}
+
+void UnixSocket::unlock() {
+    pthread_mutex_unlock(&db_mutex);
 }
 
 } // namespace ipc
