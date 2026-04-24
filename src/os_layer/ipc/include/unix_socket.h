@@ -1,5 +1,4 @@
-#ifndef UNIX_SOCKET_H
-#define UNIX_SOCKET_H
+#pragma once
 
 #include <string>
 #include <pthread.h> // adding this lib to ensure thread safety
@@ -32,4 +31,3 @@ public:
 };
 
 } // namespace ipc
-#endif

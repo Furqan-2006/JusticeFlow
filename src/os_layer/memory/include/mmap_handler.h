@@ -1,47 +1,44 @@
-#ifndef MMAP_HANDLER_H
-#define MMAP_HANDLER_H
+#pragma once
 
 #include <cstddef>
 #include <string>
 #include "../../../common/constants.h"
 
-namespace os_layer {
-namespace memory {
+namespace memory
+{
 
-class MmapHandler {
-private:
-    void* mapped_address;
-    size_t mapping_size;
-    int file_descriptor;
-    bool is_mapped;
+    class MmapHandler
+    {
+    private:
+        void *mapped_address;
+        size_t mapping_size;
+        int file_descriptor;
+        bool is_mapped;
 
-public:
-    // Constructor initializes an empty handler
-    MmapHandler();
-    
-    // Destructor automatically unmaps memory (RAII)
-    ~MmapHandler();
+    public:
+        // Constructor initializes an empty handler
+        MmapHandler();
 
-    // Map a file or shared memory object into virtual RAM
-    // fd: The open file descriptor (from shm_open or open)
-    // size: The size of the mapping
-    // is_shared: true for MAP_SHARED (IPC), false for MAP_PRIVATE (Evidence files)
-    JusticeFlow::ResultCode map(int fd, size_t size, bool is_shared);
+        // Destructor automatically unmaps memory (RAII)
+        ~MmapHandler();
 
-    // Unmap the memory explicitly
-    JusticeFlow::ResultCode unmap();
+        // Map a file or shared memory object into virtual RAM
+        // fd: The open file descriptor (from shm_open or open)
+        // size: The size of the mapping
+        // is_shared: true for MAP_SHARED (IPC), false for MAP_PRIVATE (Evidence files)
+        JusticeFlow::ResultCode map(int fd, size_t size, bool is_shared);
 
-    // Flush changes to disk/backing store (msync)
-    JusticeFlow::ResultCode sync();
+        // Unmap the memory explicitly
+        JusticeFlow::ResultCode unmap();
 
-    // Get the raw pointer to the mapped memory
-    void* getPointer() const;
+        // Flush changes to disk/backing store (msync)
+        JusticeFlow::ResultCode sync();
 
-    // Check if memory is currently mapped
-    bool isValid() const;
-};
+        // Get the raw pointer to the mapped memory
+        void *getPointer() const;
+
+        // Check if memory is currently mapped
+        bool isValid() const;
+    };
 
 } // namespace memory
-} // namespace os_layer
-
-#endif // MMAP_HANDLER_H

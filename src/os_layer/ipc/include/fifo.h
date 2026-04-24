@@ -1,5 +1,4 @@
-#ifndef FIFO_H
-#define FIFO_H
+#pragma once
 
 #include <string>
 #include "../../../common/constants.h"
@@ -18,4 +17,3 @@ public:
 };
 
 } // namespace ipc
-#endif

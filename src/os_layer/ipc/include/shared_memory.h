@@ -1,5 +1,4 @@
-#ifndef SHARED_MEMORY_H
-#define SHARED_MEMORY_H
+#pragma once
 
 #include <string>
 #include "../../../common/constants.h"
@@ -26,4 +25,3 @@ public:
 };
 
 } // namespace ipc
-#endif

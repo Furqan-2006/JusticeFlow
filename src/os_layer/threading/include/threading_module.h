@@ -6,8 +6,7 @@
  *
  */
  
- #ifndef THREADING_MODULE_H
-#define THREADING_MODULE_H
+#pragma once
 
 #include "sync.h"
 #include "connection_gate.h"
@@ -15,4 +14,3 @@
 #include "worker.h"
 #include "thread_pool.h"
 
-#endif // THREADING_MODULE_H
