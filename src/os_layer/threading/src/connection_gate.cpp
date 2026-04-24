@@ -2,11 +2,13 @@
 
 ConnectionGate::ConnectionGate() : session_semaphore(DEFAULT_MAX_CONNECTIONS) {}
 
-ConnectionGate& ConnectionGate::getInstance() {
+ConnectionGate &ConnectionGate::getInstance()
+{
     static ConnectionGate instance;
     return instance;
 }
 
-Semaphore& ConnectionGate::getSemaphore() {
+Semaphore &ConnectionGate::getSemaphore()
+{
     return session_semaphore;
 }

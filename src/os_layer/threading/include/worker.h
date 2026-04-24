@@ -1,5 +1,4 @@
-#ifndef WORKER_H
-#define WORKER_H
+#pragma once
 
 #include "session_manager.h"
 #include "connection_gate.h"
@@ -15,5 +14,3 @@ public:
     // The actual processing logic for a single task/officer request
     static void process_task(WorkerTask task);
 };
-
-#endif // WORKER_H
