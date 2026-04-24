@@ -26,6 +26,7 @@ extern "C"
         char error_detail[128];
         time_t timestamp;
     } AgentStatusMessage;
+
     typedef struct
     {
         char agent_name[32];
@@ -33,9 +34,13 @@ extern "C"
         char error_detail[128];
         time_t last_updated;
     } AgentStatus;
+
     typedef struct
     {
         pthread_mutex_t mutex;
         AgentStatus agents[MAX_AGENTS];
     } SharedStatusTable;
-}
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

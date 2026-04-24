@@ -67,7 +67,7 @@ namespace auth
             std::snprintf(log_buf, sizeof(log_buf),
                           "[AuthManager] Authentication failed for CNIC: %.8s...", cnic.c_str());
             Logger::error(log_buf);
-            return JusticeFlow::ResultCode::AUTHENTICATION_FAILED;
+            return JusticeFlow::ResultCode::AUTH_FAILED;
         }
 
         // Extract officer_id and rank
@@ -149,7 +149,7 @@ namespace auth
                           "[AuthManager] Officer %d rank insufficient: %d < %d",
                           session.officer_id, rank_value, minimum_rank);
             Logger::error(log_buf);
-            return JusticeFlow::ResultCode::PERMISSION_DENIED;
+            return JusticeFlow::ResultCode::RANK_INSUFFICIENT;
         }
     }
 

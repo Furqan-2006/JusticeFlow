@@ -4,6 +4,7 @@
 #include <ctime>
 #include "os_layer/threading/include/sync.h"
 #include "common/constants.h"
+#include <string>
 
 namespace auth
 {

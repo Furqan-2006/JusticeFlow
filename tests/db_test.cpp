@@ -1,28 +1,35 @@
-#include <iostream>
-#include <pqxx/pqxx>  // This is the official C++ Postgres library
+#include "os_layer/os_layer.h"
+#include <gtest/gtest.h>
 
-int main() {
-    try {
-        // 1. Define the connection string (The "Keys" to the DB)
-        std::string connection_string = "dbname=justiceflow user=justiceflow password=justiceflow123 host=localhost port=5432";
+#include <vector>
+#include <string>
 
-        // 2. Attempt to connect
-        std::cout << "Attempting to connect to PostgreSQL..." << std::endl;
-        pqxx::connection C(connection_string);
+TEST(OSLayerDB, ConnectAndSelectOne)
+{
+    // Connect through the OS-layer facade (IpcManager -> UnixSocket).
+    JusticeFlow::ResultCode rc = ipc::IpcManager::getInstance().connectDatabase();
 
-        // 3. Check if open
-        if (C.is_open()) {
-            std::cout << " SUCCESS: Connected to database: " << C.dbname() << std::endl;
-            std::cout << "   User: " << C.username() << std::endl;
-        } else {
-            std::cout << " ERROR: Can't open database" << std::endl;
-            return 1;
-        }
-
-        // 4. (Optional) Disconnect is automatic when C goes out of scope
-    } catch (const std::exception &e) {
-        std::cerr << " EXCEPTION: " << e.what() << std::endl;
-        return 1;
+    // If DB isn't configured/running, skip (so OS-layer tests can still pass on dev/CI machines).
+    if (rc != JusticeFlow::ResultCode::OK)
+    {
+        GTEST_SKIP()
+            << "connectDatabase() failed (rc=" << static_cast<int>(rc) << "). "
+            << "Ensure Postgres is running and env vars are set before launching the test: "
+            << "JF_DB_HOST, JF_DB_PORT, JF_DB_NAME, JF_DB_USER(=justice_app), JF_DB_PASS.";
     }
-    return 0;
+
+    std::vector<std::vector<std::string>> results;
+    rc = ipc::IpcManager::getInstance().executeQuery("SELECT 1;", results);
+
+    if (rc != JusticeFlow::ResultCode::OK)
+    {
+        ipc::IpcManager::getInstance().disconnectDatabase();
+        FAIL() << "executeQuery(\"SELECT 1;\") failed (rc=" << static_cast<int>(rc) << ")";
+    }
+
+    ASSERT_FALSE(results.empty());
+    ASSERT_FALSE(results[0].empty());
+    EXPECT_EQ(results[0][0], "1");
+
+    ipc::IpcManager::getInstance().disconnectDatabase();
 }

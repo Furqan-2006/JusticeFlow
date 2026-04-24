@@ -17,3 +17,5 @@ __pycache__/
 
 # Ignore System Files
 .DS_Store
+
+/tests/build/

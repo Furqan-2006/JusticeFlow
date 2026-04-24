@@ -1,17 +1,18 @@
 #include "../include/signal_handler.h"
 #include "../include/scheduler.h"
-#include "os_layer/process/include/process_manager.h"
+#include "../../process/include/process_manager.h"
 
 #include <sys/wait.h>
 #include <errno.h>
 #include <cstddef>
 
+// Dispatch + callbacks
 SignalHandler::SignalCallback SignalHandler::dispatch_table[NSIG] = {nullptr};
 void (*SignalHandler::config_reload_cb)() = nullptr;
 
-// CRITICAL FIX #9.1, #9.3: Flags for main loop to poll
-static volatile sig_atomic_t sig_alarm_pending = 0;
-static volatile sig_atomic_t sig_child_pending = 0;
+// ✅ Signal-safe flags
+static volatile sig_atomic_t alarm_pending = 0;
+static volatile sig_atomic_t chld_pending = 0;
 
 void SignalHandler::init()
 {
@@ -49,70 +50,57 @@ void SignalHandler::master_handler(int sig)
     }
 }
 
-// CRITICAL FIX #9.1: handle_sigalrm now ONLY sets a flag (async-signal-safe)
-// Main loop polls this flag and calls Scheduler::tick()
-void SignalHandler::handle_sigalrm(int sig)
+// ✅ Async-signal-safe: only sets a flag
+void SignalHandler::handle_sigalrm(int /*sig*/)
 {
-    int saved_errno = errno;
-    sig_alarm_pending = 1;  // Only atomic flag write - async-signal-safe
-    errno = saved_errno;
+    alarm_pending = 1;
 }
 
-// CRITICAL FIX #9.3: handle_sigchld now does NOT acquire mutexes
-// Only sets a flag; ProcessManager::reapOne is called from main loop
-void SignalHandler::handle_sigchld(int sig)
+// ✅ Async-signal-safe: only sets a flag
+void SignalHandler::handle_sigchld(int /*sig*/)
 {
-    int saved_errno = errno;
-    sig_child_pending = 1;  // Only atomic flag write - async-signal-safe
-    errno = saved_errno;
+    chld_pending = 1;
 }
 
-// CRITICAL FIX #9.2: handle_sigterm_int only requests drain (async-signal-safe)
-// Actual shutdown operations happen in Scheduler::handleDrainRequest() from main loop
-void SignalHandler::handle_sigterm_int(int sig)
+// ✅ Async-signal-safe: request drain via atomic write only
+void SignalHandler::handle_sigterm_int(int /*sig*/)
 {
-    int saved_errno = errno;
-    Scheduler::getInstance().requestDrain();  // Only writes to atomic bool - safe
-    errno = saved_errno;
+    Scheduler::getInstance().requestDrain();
 }
 
-void SignalHandler::handle_sighup(int sig)
+void SignalHandler::handle_sighup(int /*sig*/)
 {
-    int saved_errno = errno;
+    // NOTE: calling arbitrary callbacks from signal handler is NOT async-signal-safe.
+    // If you want strict safety here too, convert SIGHUP into a flag like others.
     if (config_reload_cb != nullptr)
     {
         config_reload_cb();
     }
-    errno = saved_errno;
 }
 
-// NEW: Helper function for main loop to process pending signals
-// This should be called from the main event loop (NOT from signal handler)
 void SignalHandler::processPendingSignals()
 {
-    // Process pending SIGALRM
-    if (sig_alarm_pending)
+    // Drain request first (so shutdown doesn't keep doing work)
+    Scheduler::getInstance().handleDrainRequest();
+
+    if (alarm_pending)
     {
-        sig_alarm_pending = 0;
-        Scheduler::getInstance().tick();  // Now safe - main loop context
+        alarm_pending = 0;
+        Scheduler::getInstance().tick();
     }
 
-    // Process pending SIGCHLD
-    if (sig_child_pending)
+    if (chld_pending)
     {
-        sig_child_pending = 0;
+        chld_pending = 0;
+
         pid_t pid;
         int status;
+
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
         {
             ProcessAction action;
             ProcessManager::getInstance().reapOne(pid, action);
+            // Optional: act on action (restart/escalate) from supervisor loop
         }
-    }
-
-    // Process pending drain request
-    if (Scheduler::getInstance().shouldDrain())
-    {
-        Scheduler::getInstance().handleDrainRequest();
     }
 }

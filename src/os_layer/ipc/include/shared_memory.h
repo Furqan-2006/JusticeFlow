@@ -2,26 +2,28 @@
 
 #include <string>
 #include "../../../common/constants.h"
-#include "shm_layout.h"
+#include "shm_layout.h" // pulls common/ipc_types.h
 
-namespace ipc {
+namespace ipc
+{
 
-class SharedMemory {
-private:
-    std::string shm_name;
-    int shm_fd;
-    SharedStatusTable* mapped_table;
-    bool is_creator;
+    class SharedMemory
+    {
+    private:
+        std::string shm_name;
+        int shm_fd;
+        SharedStatusTable *mapped_table;
+        bool is_creator;
 
-public:
-    SharedMemory(const std::string& name);
-    ~SharedMemory();
+    public:
+        explicit SharedMemory(const std::string &name);
+        ~SharedMemory();
 
-    JusticeFlow::ResultCode create();
-    JusticeFlow::ResultCode attach();
-    void destroy();
+        JusticeFlow::ResultCode create();
+        JusticeFlow::ResultCode attach();
+        void destroy();
 
-    SharedStatusTable* getTable() const; // Returns typed pointer!
-};
+        SharedStatusTable *getTable() const;
+    };
 
 } // namespace ipc

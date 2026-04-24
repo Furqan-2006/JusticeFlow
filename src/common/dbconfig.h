@@ -20,11 +20,11 @@ namespace JusticeFlow
     struct DBConfig
     {
         // Connection parameters
-        std::string host = "127.0.0.1";
+        std::string host = "/var/run/postgresql";
         int port = 5432;
         std::string dbname = "justiceflow_db";
         std::string user = "justice_app"; // Forced default for C++ layer
-        std::string password = "";
+        std::string password = "justiceflow123";
 
         // Connection pool and timeout settings
         int min_connections = 2;

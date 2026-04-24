@@ -2,6 +2,7 @@
 
 #include <sys/types.h>
 #include "common/constants.h"
+#include "process_registry.h"
 
 enum class ProcessAction
 {

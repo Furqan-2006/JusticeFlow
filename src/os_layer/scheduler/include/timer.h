@@ -1,8 +1,5 @@
 #pragma once
 
-// CRITICAL FIX #10.1: Feature test macro BEFORE system headers
-#define _POSIX_C_SOURCE 199309L
-
 #include "common/constants.h"
 
 namespace Timer

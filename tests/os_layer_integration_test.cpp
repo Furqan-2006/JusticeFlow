@@ -15,9 +15,9 @@
  * - PostgreSQL running with test database
  * - Environment variables set:
  *   JF_DB_HOST=/var/run/postgresql
- *   JF_DB_NAME=justiceflow_test
+ *   JF_DB_NAME=justiceflow_db
  *   JF_DB_USER=justice_app
- *   JF_DB_PASSWORD=testpass123
+ *   JF_DB_PASSWORD=justiceflow123
  *
  * Build:
  *   g++ -std=c++17 -pthread -o os_layer_integration_test \
@@ -280,7 +280,7 @@ TEST_F(AuthManagerTest, RankValidation)
 
     // Require DSP (3) — should fail
     result = auth::AuthManager::getInstance().validateRank(session, 3);
-    EXPECT_EQ(result, JusticeFlow::ResultCode::PERMISSION_DENIED);
+    EXPECT_EQ(result, JusticeFlow::ResultCode::RANK_INSUFFICIENT);
 }
 
 TEST_F(AuthManagerTest, ActiveSessionCount)
@@ -401,7 +401,7 @@ TEST_F(SchedulerTest, SchedulerStateTransition)
     Scheduler &scheduler = Scheduler::getInstance();
 
     SchedulerState initial_state = scheduler.getState();
-    EXPECT_NE(initial_state, SchedulerState::UNDEFINED);
+    EXPECT_NE(initial_state, SchedulerState::STOPPED);
 
     scheduler.setState(SchedulerState::RUNNING);
     EXPECT_EQ(scheduler.getState(), SchedulerState::RUNNING);

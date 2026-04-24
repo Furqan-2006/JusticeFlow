@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pthread.h>
+#include <string>
 #include "sync.h"
 #include "worker.h"
 

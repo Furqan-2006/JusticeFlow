@@ -42,4 +42,3 @@ public:
     mlock_guard &operator=(mlock_guard &&) = delete;
 };
 
-#endif // MLOCK_GUARD_H

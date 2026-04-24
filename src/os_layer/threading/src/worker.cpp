@@ -1,5 +1,5 @@
 #include "../include/worker.h"
-#include "os_layer/ipc/include/ipc_manager.h"
+#include "../../../os_layer/ipc/include/ipc_manager.h"
 #include "shr_infra/auth/include/auth_module.h"
 #include "common/logger.h"
 
@@ -471,7 +471,7 @@ namespace
                     std::snprintf(log_buf, sizeof(log_buf),
                                   "[Worker %d] Session refresh failed for officer %d",
                                   thread_id, session.officer_id);
-                    Logger::warning(log_buf);
+                    Logger::error(log_buf);
                     // Continue anyway — session may still be valid
                 }
 

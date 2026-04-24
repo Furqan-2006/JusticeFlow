@@ -2,19 +2,9 @@
 
 #include <pthread.h>
 #include <time.h>
+#include "../../../common/ipc_types.h"
 
 namespace ipc {
-
-// Contract Page 13: Live Agent Status Table
-struct AgentStatus {
-    char agent_name[32];
-    time_t last_run_at;
-    time_t next_run_at;
-    int predictions_generated;
-    double model_accuracy;
-    bool is_running;
-    int last_error_code;
-};
 
 /**
  * Full shared memory segment layout.

@@ -1,5 +1,6 @@
 #include "../include/sync.h"
 #include "common/logger.h"
+#include <cstring>
 
 // --- Mutex ---
 

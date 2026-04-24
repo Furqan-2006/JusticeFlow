@@ -1,9 +1,10 @@
 #pragma once
 
 #include <string>
+#include <cstring>
 #include <pthread.h>
 #include <vector>
-#include <libpq-fe.h>
+#include <postgresql/libpq-fe.h>
 #include "../../../common/constants.h"
 
 namespace ipc
