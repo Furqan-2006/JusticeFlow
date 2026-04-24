@@ -1,5 +1,5 @@
 #include "../include/thread_pool.h"
-#include <iostream>
+#include "common/logger.h"
 
 void *ThreadPool::worker_routine(void *arg)
 {
@@ -41,18 +41,41 @@ void *ThreadPool::worker_routine(void *arg)
 
 void ThreadPool::init(int num_workers)
 {
+    // CRITICAL FIX #2.2: Prevent multiple init() calls
+    if (initialized)
+    {
+        Logger::error("[ThreadPool] init() called multiple times. Ignoring.");
+        return;
+    }
+
+    // CRITICAL FIX #2.4: Check lower bound - num_workers must be > 0
+    if (num_workers <= 0)
+    {
+        Logger::error("[ThreadPool] num_workers must be > 0");
+        return;
+    }
+
     if (num_workers > MAX_WORKERS)
         num_workers = MAX_WORKERS;
+
     active_worker_count = num_workers;
 
     for (int i = 0; i < active_worker_count; i++)
     {
+        // CRITICAL FIX #2.1: Check pthread_create return value
         if (pthread_create(&workers[i], nullptr, worker_routine, this) != 0)
         {
-            std::cerr << "CRITICAL: Failed to spawn thread " << i << "\n";
+            Logger::error(("CRITICAL: Failed to spawn thread " + std::to_string(i)).c_str());
+            // Decrement count since this thread was never created
+            active_worker_count--;
         }
     }
-    std::cout << "[ThreadPool] Initialized with " << active_worker_count << " workers.\n";
+
+    initialized = true;
+
+    char log_buf[128];
+    std::snprintf(log_buf, sizeof(log_buf), "[ThreadPool] Initialized with %d workers.", active_worker_count);
+    Logger::info(log_buf);
 }
 
 bool ThreadPool::submit(WorkerTask task)
@@ -61,7 +84,7 @@ bool ThreadPool::submit(WorkerTask task)
 
     if (task_count == QUEUE_CAPACITY)
     {
-        std::cerr << "[ThreadPool] Queue full. Dropping task.\n";
+        Logger::error("[ThreadPool] Queue full. Dropping task.");
         return false;
     }
 
@@ -91,5 +114,11 @@ void ThreadPool::shutdown()
         pthread_join(workers[i], nullptr);
     }
 
-    std::cout << "[ThreadPool] Shutdown complete. All threads joined.\n";
+    Logger::info("[ThreadPool] Shutdown complete. All threads joined.");
+}
+
+// CRITICAL FIX #2.3: Now implemented
+void ThreadPool::broadcastAiUpdate()
+{
+    ai_result_cond.broadcast();
 }
