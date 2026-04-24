@@ -1,5 +1,5 @@
 #include "../include/process_spawner.h"
-#include "../../process/include/process_registry.h"
+#include "os_layer/process/include/process_registry.h"
 #include "common/logger.h"
 
 #include <sys/types.h>
@@ -10,9 +10,12 @@
 
 void AgentJob::execute()
 {
-    // 1. Create FIFO
+    // 1. Remove old FIFO if it exists
     unlink(fifo_path.c_str());
-    if (mkfifo(fifo_path.c_str(), 0666) == -1)
+
+    // CRITICAL FIX #11.3: Changed permissions from 0666 (world-writable) to 0600 (owner-only)
+    // This prevents any local user from spoofing agent results
+    if (mkfifo(fifo_path.c_str(), 0600) == -1)
     {
         Logger::error("Failed to create FIFO for agent");
         return;
@@ -31,6 +34,7 @@ void AgentJob::execute()
     if (pid == 0)
     {
         // Child Process: exec the Python agent
+        // TODO: Make Python path configurable via environment or config file
         execl("/usr/bin/python3", "python3", executable_path.c_str(), fifo_path.c_str(), (char *)nullptr);
 
         // If execl returns, it failed
@@ -45,7 +49,10 @@ void AgentJob::execute()
     record.state = ProcessState::RUNNING;
 
     ProcessRegistry::getInstance().registerProcess(pid, record);
-    Logger::info("Agent process spawned successfully.");
+
+    char log_buf[128];
+    std::snprintf(log_buf, sizeof(log_buf), "Agent %s (PID: %d) spawned successfully", agent_name.c_str(), pid);
+    Logger::info(log_buf);
 }
 
 void AgentJob::cleanupFifo()

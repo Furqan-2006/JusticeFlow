@@ -1,4 +1,5 @@
 #include "../include/daemon.h"
+#include "common/logger.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -37,7 +38,9 @@ namespace Daemon
             std::exit(EXIT_SUCCESS);
         }
 
-        umask(0);
+        // CRITICAL FIX #12.2: Changed from umask(0) to umask(0022)
+        // Prevents all subsequently created files from being world-writable
+        umask(0022);
 
         if (chdir("/") < 0)
         {
@@ -54,14 +57,22 @@ namespace Daemon
             close(fd);
         }
 
+        // CRITICAL FIX #12.1: Check for error AND ensure fd_null is properly closed
         int fd_null = open("/dev/null", O_RDWR);
-        if (fd_null != 0)
+        if (fd_null == -1)
         {
             return JusticeFlow::ResultCode::FILE_SYSTEM_ERROR;
         }
+
         dup2(fd_null, STDIN_FILENO);
         dup2(fd_null, STDOUT_FILENO);
         dup2(fd_null, STDERR_FILENO);
+
+        // Close fd_null if it's not one of the standard file descriptors (should not happen, but defensive)
+        if (fd_null > STDERR_FILENO)
+        {
+            close(fd_null);
+        }
 
         FILE *pid_file = fopen(pid_file_path, "w");
         if (!pid_file)
