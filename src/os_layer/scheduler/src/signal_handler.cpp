@@ -75,7 +75,7 @@ void SignalHandler::handle_sigterm_int(int sig)
 {
     int saved_errno = errno;
 
-    Scheduler::getInstance().getState(SchedulerState::DRAINING);
+    Scheduler::getInstance().setState(SchedulerState::DRAINING);
 
     errno = saved_errno;
 }

@@ -1,5 +1,4 @@
-#ifndef CONNECTION_GATE_H
-#define CONNECTION_GATE_H
+#pragma once
 
 #include "sync.h"
 
@@ -9,21 +8,12 @@ class ConnectionGate {
 private:
     Semaphore session_semaphore;
 
-    ConnectionGate() : session_semaphore(DEFAULT_MAX_CONNECTIONS) {}
+    ConnectionGate();
     ConnectionGate(const ConnectionGate&) = delete;
     ConnectionGate& operator=(const ConnectionGate&) = delete;
 
 public:
-    static ConnectionGate& getInstance() {
-        static ConnectionGate instance;
-        return instance;
-    }
+    static ConnectionGate& getInstance();
 
-    // Instead of raw acquire/release, we hand the worker the Semaphore.
-    // The worker does: SemGuard lock(ConnectionGate::getInstance().getSemaphore());
-    Semaphore& getSemaphore() {
-        return session_semaphore;
-    }
+    Semaphore& getSemaphore();
 };
-
-#endif // CONNECTION_GATE_H
