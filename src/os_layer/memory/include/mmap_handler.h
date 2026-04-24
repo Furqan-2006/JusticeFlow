@@ -22,6 +22,14 @@ namespace memory
         // Destructor automatically unmaps memory (RAII)
         ~MmapHandler();
 
+        // Prevent copying to avoid double-unmap bug (Issue #8.1)
+        MmapHandler(const MmapHandler&) = delete;
+        MmapHandler& operator=(const MmapHandler&) = delete;
+
+        // Prevent move semantics to maintain strict ownership
+        MmapHandler(MmapHandler&&) = delete;
+        MmapHandler& operator=(MmapHandler&&) = delete;
+
         // Map a file or shared memory object into virtual RAM
         // fd: The open file descriptor (from shm_open or open)
         // size: The size of the mapping

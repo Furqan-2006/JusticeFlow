@@ -33,6 +33,26 @@ JusticeFlow::ResultCode ProcessRegistry::updateState(pid_t pid, ProcessState new
     return JusticeFlow::ResultCode::OK;
 }
 
+JusticeFlow::ResultCode ProcessRegistry::incrementRestartCount(pid_t pid, int &out_new_count)
+{
+    // CRITICAL FIX: Atomic operation under lock
+    // This ensures restart_count is immediately persisted in the registry
+    // and visible to all threads. No TOCTOU window.
+    MutexGuard lock(mutex_);
+
+    auto it = registry_.find(pid);
+    if (it == registry_.end())
+    {
+        return JusticeFlow::ResultCode::NOT_FOUND;
+    }
+
+    // Increment under lock - immediately visible to all threads
+    it->second.restart_count++;
+    out_new_count = it->second.restart_count;
+
+    return JusticeFlow::ResultCode::OK;
+}
+
 JusticeFlow::ResultCode ProcessRegistry::getRecord(pid_t pid, ProcessRecord &out_record)
 {
     MutexGuard lock(mutex_);
