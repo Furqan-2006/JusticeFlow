@@ -22,7 +22,7 @@ namespace JusticeFlow
         // Connection parameters
         std::string host = "/var/run/postgresql";
         int port = 5432;
-        std::string dbname = "justiceflow_db";
+        std::string dbname = "justiceflow";
         std::string user = "justice_app"; // Forced default for C++ layer
         std::string password = "justiceflow123";
 
