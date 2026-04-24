@@ -16,5 +16,3 @@ public:
     mlock_guard(const mlock_guard &) = delete;
     mlock_guard &operator=(const mlock_guard &) = delete;
 };
-
-#endif // MLOCK_GUARD_H
