@@ -106,13 +106,16 @@ justiceflow/
 |   ├── shr_infra/              // auth and session layer --- shared infrastructure
 |   │   ├── auth/
 |   |   |   ├── include/
-|   │   │   |   ├── auth.h
-|   │   │   |   ├── session.h
-|   │   │   |   └── token.h
+|   │   │   |   ├── auth_manager.h
+|   │   │   |   ├── auth_module.h
+|   │   │   |   ├── session_store.h
+|   │   │   |   ├── duty_cache.h
+|   │   │   |   └── token_generator.h
 |   |   |   ├── src/
-|   │   │       ├── auth.cpp
-|   │   │       ├── session.cpp
-|   │   │       └── token.cpp
+|   │   │       ├── auth_manager.cpp
+|   │   │       ├── session_store.cpp
+|   │   │       ├── duty_cache.cpp
+|   │   │       └── token_generator.cpp
 |   │   │
 |   │   ├── middleware/
 |   │       ├── auth_middleware.h
