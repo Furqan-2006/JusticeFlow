@@ -24,6 +24,18 @@ justiceflow/
 ├── docs/
 |
 ├── src/
+|
+├── api_gateway/              // ← NEW: Flask ↔ C++ bridge /     dispatcher layer
+|   │   ├── include/
+|   │   │   ├── api_gateway.h     // Request dispatcher
+|   │   │   ├── command_router.h  // Routes to subsystems
+|   │   │   └── auth_validator.h  // Token + permission checks
+|   │   ├── src/
+|   │   │   ├── api_gateway.cpp     // Init + main loop
+|   │   │   ├── command_router.cpp  // Subsystem routing logic
+|   │   │   └── auth_validator.cpp  // Auth checks
+|   │   │
+|   │   └── README.md
 |   |
 |   ├── ai_agents/
 |   |   ├── hotspot_agent.py
@@ -62,12 +74,16 @@ justiceflow/
 |   │   │   |   ├── unix_socket.h
 |   │   │   |   ├── fifo.h
 |   │   │   |   ├── shared_memory.h
-|   │   │   |   └── shm_layout.h          // shared struct layout
+|   │   │   |   ├── shm_layout.h          // shared struct layout
+|   │   │   |   ├── domain_socket.h       // Unix domain socket listener
+|   |   |   |   └── socket_request.h      // request/response types
 |   |   |   ├── src/
 |   │   │       ├── ipc_manager.cpp       // unified interface
 |   │   │       ├── unix_socket.cpp       // PostgreSQL (libpq)
 |   │   │       ├── fifo.cpp              // mkfifo for agents
-|   │   │       └── shared_memory.cpp     // shm_open + mmap
+|   │   │       ├── shared_memory.cpp     // shm_open + mmap
+|   │   │       ├── domain_socket.cpp     // OS-level IPC (same as Unix sockets to Postgres)
+|   |   |       └── socket_request.cpp    // Request/response serialization is data plane concern
 |   │   │
 |   │   ├── threading/           // Abu Bakar (execution layer)
 |   |   |   ├── include/
