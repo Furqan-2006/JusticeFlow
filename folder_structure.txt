@@ -1,24 +1,42 @@
 justiceflow/
 │
-├── dashboard/
-│   ├── app.py              // Flask app (routes + API together)
-│   ├── db.py               // psycopg2 connection
-│   │
-│   ├── templates/
-│   │   ├── dashboard.html
-│   │   ├── os_metrics.html
-│   │   ├── ai_status.html
-│   │   └── analytics.html
-│   │
-│   ├── static/
-│   │   ├── js/
-│   │   │   ├── charts.js
-│   │   │   └── live_updates.js
-│   │   └── css/
-│   │       └── styles.css
-│   │
-│   ├── requirements.txt
-│   └── run.py
+├── dashboard
+|   ├── app.py                      // Flask routes + views
+|   ├── db.py                       // psycopg2 connection (for direct DB queries if needed)
+|   │
+|   ├── client/                     // Unix socket client to C++ backend
+|   │   ├── __init__.py
+|   │   ├── socket_client.py        // Connect to /tmp/justiceflow.sock
+|   │   ├── request_builder.py      // Build JSON commands
+|   │   └── response_parser.py      // Parse C++ responses
+|   │
+|   ├── services/                   // Business logic layer
+|   │   ├── __init__.py
+|   │   ├── auth_service.py         // Login, logout (calls C++ via socket)
+|   │   ├── case_service.py         // Create/view cases
+|   │   ├── duty_service.py         // Assign duties
+|   │   └── officer_service.py      // Officer management
+|   │
+|   ├── templates/
+|   │   ├── dashboard.html
+|   │   ├── os_metrics.html
+|   │   ├── ai_status.html
+|   │   ├── analytics.html
+|   │   ├── login.html              // Login page
+|   │   ├── cases.html              // Cases list
+|   │   └── duties.html             // Duties assignment
+|   │
+|   ├── static/
+|   │   ├── js/
+|   │   │   ├── charts.js
+|   │   │   ├── live_updates.js
+|   │   │   └── socket_client.js    // WebSocket/polling for real-time updates
+|   │   └── css/
+|   │       └── styles.css
+|   │
+|   ├── requirements.txt            // requests, python-socketio, etc.
+|   ├── run.py
+|   └── README.md                   // Document socket protocol
 |
 ├── db/
 ├── docs/
