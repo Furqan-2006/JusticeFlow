@@ -149,11 +149,7 @@ justiceflow/
 |   │   │       ├── auth_manager.cpp
 |   │   │       ├── session_store.cpp
 |   │   │       ├── duty_cache.cpp
-|   │   │       └── token_generator.cpp
-|   │   │
-|   │   ├── middleware/
-|   │       ├── auth_middleware.h
-|   │       └── auth_middleware.cpp
+|   │   │       └── token_generator.cpp
 |   |
 |   ├── subsystem1/
 |   ├── subsystem2/
