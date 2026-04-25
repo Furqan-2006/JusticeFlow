@@ -149,59 +149,68 @@ justiceflow/
 |   │   │       ├── auth_manager.cpp
 |   │   │       ├── session_store.cpp
 |   │   │       ├── duty_cache.cpp
-|   │   │       └── token_generator.cpp
+|   │   │       └── token_generator.cpp
+
 |   |
 |   ├── subsystem1/
 |   ├── subsystem2/
 |   ├── subsystem3/
 |   |   │
-|   |   ├── security/                  ← Enforcement layer (NOT authentication)
-|   |   |   ├── include/
-|   |   │   |   ├── access_control.h
-|   |   │   |   ├── enforcement.h
-|   |   │   |   └── policy_engine.h
-|   |   |   ├── src/
-|   |   │       ├── access_control.cpp    // uses infra auth → enforces permissions
-|   |   │       ├── enforcement.cpp        // arrest, warrant, bail logic
-|   |   │       └── policy_engine.cpp     // rule evaluation (who can do what action)
+|   |   ├── security/                          ← Module 2: Warrant + Arrest + Bail
+|   |   │   ├── include/
+|   |   │   │   ├── access_control.h          // rank validation before every legal operation
+|   |   │   │   ├── enforcement.h             // warrant/arrest/bail operations + state machines
+|   |   │   │   └── policy_engine.h           // Chain of Responsibility — rank escalation rules
+|   |   │   └── src/
+|   |   │       ├── access_control.cpp
+|   |   │       ├── enforcement.cpp
+|   |   │       └── policy_engine.cpp
 |   |   │
-|   |   ├── audit/                     ← System-wide traceability
-|   |   |   ├── include/
-|   |   │   |   ├── activity_tracker.h
-|   |   │   |   ├── audit_log.h
-|   |   │   |   └── audit_query.h
-|   |   |   ├── src/
-|   |   │       ├── activity_tracker.cpp  // tracks actions from all subsystems
-|   |   │       ├── audit_log.cpp         // persistent logs (DB/files)
-|   |   │       └── audit_query.cpp       // fetch/filter logs
+|   |   ├── audit/                             ← Module 1: Audit & Compliance
+|   |   │   ├── include/
+|   |   │   │   ├── audit_log.h               // C++ query interface into audit.Audit_Log
+|   |   │   │   ├── audit_query.h             // getChangeHistory, getOfficerActions, etc.
+|   |   │   │   └── activity_tracker.h        // detectSuspiciousActivity, bulk change detection
+|   |   │   └── src/
+|   |   │       ├── audit_log.cpp
+|   |   │       ├── audit_query.cpp
+|   |   │       └── activity_tracker.cpp
 |   |   │
-|   |   ├── legal/                     ← Domain rules & validation
-|   |   |   ├── include/
-|   |   │   |   ├── case_validation.h
-|   |   │   |   ├── evidence_rules.h
-|   |   │   |   └── compliance.h
-|   |   |   ├── src/
-|   |   │       ├── compliance.cpp        // policy compliance (laws, SOPs)
-|   |   │       ├── case_validation.cpp   // FIR / case legality checks
-|   |   │       └── evidence_rules.cpp    // admissibility, constraints
+|   |   ├── forensic/                          ← Module 3: Forensic & Lab
+|   |   │   ├── include/
+|   |   │   │   ├── forensic_request.h        // state machine + all 6 operations
+|   |   │   │   └── forensic_repository.h     // all DB access for forensic tables
+|   |   │   └── src/
+|   |   │       ├── forensic_request.cpp
+|   |   │       └── forensic_repository.cpp
 |   |   │
-|   |   ├── integration/               ← Bridges to other subsystems
-|   |   |   ├── include/
-|   |   │   |   ├── s1_bridge.h
-|   |   │   |   ├── s2_bridge.h
-|   |   │   |   └── audit_bridge.h
-|   |   |   ├── src/
-|   |   │       ├── s1_bridge.cpp         // hooks for subsystem1
-|   |   │       ├── s2_bridge.cpp         // hooks for subsystem2
-|   |   │       └── audit_bridge.cpp      // centralized logging entry point
+|   |   ├── legal/                             ← Validation rules shared by Module 2 + 3
+|   |   │   ├── include/
+|   |   │   │   ├── case_validation.h         // FIR/case legality checks before warrant
+|   |   │   │   ├── evidence_rules.h          // admissibility, soft-delete enforcement
+|   |   │   │   └── compliance.h              // SOP and policy compliance checks
+|   |   │   └── src/
+|   |   │       ├── case_validation.cpp
+|   |   │       ├── evidence_rules.cpp
+|   |   │       └── compliance.cpp
 |   |   │
-|   |   └── utils/                     ← Internal helpers
+|   |   ├── integration/                       ← Cross-subsystem bridges
+|   |   │   ├── include/
+|   |   │   │   ├── audit_bridge.h            // single audit entry point for all subsystems
+|   |   │   │   ├── s1_bridge.h               // hooks into subsystem1 (Officers/Personnel)
+|   |   │   │   └── s2_bridge.h               // hooks into subsystem2 (FIR/Evidence/Cases)
+|   |   │   └── src/
+|   |   │       ├── audit_bridge.cpp
+|   |   │       ├── s1_bridge.cpp
+|   |   │       └── s2_bridge.cpp
+|   |   │
+|   |   └── utils/                             ← Internal helpers
 |   |       ├── include/
-|   |       |   ├── rule_utils.h
-|   |       |   └── time_utils.h
-|   |       ├── src/
-|   |           ├── rule_utils.cpp
-|   |           └── time_utils.cpp
+|   |       │   ├── time_utils.h              // time_t arithmetic, expiry checks
+|   |       │   └── rule_utils.h              // rank comparison helpers, enum utilities
+|   |       └── src/
+|   |           ├── time_utils.cpp
+|   |           └── rule_utils.cpp
 |
 ├── tests/
 |   ├── 
