@@ -155,62 +155,39 @@ justiceflow/
 |   ├── subsystem1/
 |   ├── subsystem2/
 |   ├── subsystem3/
-|   |   │
-|   |   ├── security/                          ← Module 2: Warrant + Arrest + Bail
+|   |   ├── audit/
 |   |   │   ├── include/
-|   |   │   │   ├── access_control.h          // rank validation before every legal operation
-|   |   │   │   ├── enforcement.h             // warrant/arrest/bail operations + state machines
-|   |   │   │   └── policy_engine.h           // Chain of Responsibility — rank escalation rules
+|   |   │   │   ├── audit_manager.h       ← singleton, entry point for all audit queries
+|   |   │   │   └── audit_query.h         ← stateless query builder, Template Method pattern
 |   |   │   └── src/
-|   |   │       ├── access_control.cpp
-|   |   │       ├── enforcement.cpp
-|   |   │       └── policy_engine.cpp
+|   |   │       ├── audit_manager.cpp
+|   |   │       └── audit_query.cpp
 |   |   │
-|   |   ├── audit/                             ← Module 1: Audit & Compliance
+|   |   ├── enforcement/
 |   |   │   ├── include/
-|   |   │   │   ├── audit_log.h               // C++ query interface into audit.Audit_Log
-|   |   │   │   ├── audit_query.h             // getChangeHistory, getOfficerActions, etc.
-|   |   │   │   └── activity_tracker.h        // detectSuspiciousActivity, bulk change detection
+|   |   │   │   ├── warrant_manager.h     ← warrant state machine + all warrant operations
+|   |   │   │   ├── arrest_manager.h      ← custody state machine + all arrest operations
+|   |   │   │   └── bail_manager.h        ← bail state machine + all bail operations
 |   |   │   └── src/
-|   |   │       ├── audit_log.cpp
-|   |   │       ├── audit_query.cpp
-|   |   │       └── activity_tracker.cpp
+|   |   │       ├── warrant_manager.cpp
+|   |   │       ├── arrest_manager.cpp
+|   |   │       └── bail_manager.cpp
 |   |   │
-|   |   ├── forensic/                          ← Module 3: Forensic & Lab
+|   |   ├── forensic/
 |   |   │   ├── include/
-|   |   │   │   ├── forensic_request.h        // state machine + all 6 operations
-|   |   │   │   └── forensic_repository.h     // all DB access for forensic tables
+|   |   │   │   ├── forensic_manager.h    ← forensic state machine + all 6 operations
+|   |   │   │   └── forensic_repository.h ← pure DB access layer, Repository pattern
 |   |   │   └── src/
-|   |   │       ├── forensic_request.cpp
+|   |   │       ├── forensic_manager.cpp
 |   |   │       └── forensic_repository.cpp
 |   |   │
-|   |   ├── legal/                             ← Validation rules shared by Module 2 + 3
-|   |   │   ├── include/
-|   |   │   │   ├── case_validation.h         // FIR/case legality checks before warrant
-|   |   │   │   ├── evidence_rules.h          // admissibility, soft-delete enforcement
-|   |   │   │   └── compliance.h              // SOP and policy compliance checks
-|   |   │   └── src/
-|   |   │       ├── case_validation.cpp
-|   |   │       ├── evidence_rules.cpp
-|   |   │       └── compliance.cpp
+|   |   ├── sql/
+|   |   │   ├── audit_triggers.sql        ← SECURITY DEFINER trigger + immutability enforcement
+|   |   │   ├── enforcement_jobs.sql      ← expire_warrants() + expire_bail_records() SQL functions
+|   |   │   └── forensic_triggers.sql     ← evidence status sync triggers
 |   |   │
-|   |   ├── integration/                       ← Cross-subsystem bridges
-|   |   │   ├── include/
-|   |   │   │   ├── audit_bridge.h            // single audit entry point for all subsystems
-|   |   │   │   ├── s1_bridge.h               // hooks into subsystem1 (Officers/Personnel)
-|   |   │   │   └── s2_bridge.h               // hooks into subsystem2 (FIR/Evidence/Cases)
-|   |   │   └── src/
-|   |   │       ├── audit_bridge.cpp
-|   |   │       ├── s1_bridge.cpp
-|   |   │       └── s2_bridge.cpp
-|   |   │
-|   |   └── utils/                             ← Internal helpers
-|   |       ├── include/
-|   |       │   ├── time_utils.h              // time_t arithmetic, expiry checks
-|   |       │   └── rule_utils.h              // rank comparison helpers, enum utilities
-|   |       └── src/
-|   |           ├── time_utils.cpp
-|   |           └── rule_utils.cpp
+|   |   ├── subsystem3.h                  ← public API
+|   |   └── subsystem3.cpp                ← Implementation + routing to managers
 |
 ├── tests/
 |   ├── 
