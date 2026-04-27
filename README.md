@@ -435,9 +435,9 @@ ctest --output-on-failure
 
 | Name | Responsibility |
 |------|---------------|
-| Furqan | OS Scheduler (control plane) — daemon, timer, job executor, process spawner |
-| Abdullah | OS IPC (data plane) — Unix socket, FIFO, shared memory, domain socket listener |
-| Abu Bakar | OS Threading (execution layer) — thread pool, worker, session manager, sync |
+| Furqan | Subsystem 3, Authentication module, OS Scheduler (control plane) — daemon, timer, job executor, process spawner |
+| Abdullah | Subsystem 2, Flask Dashboard, OS IPC (data plane) — Unix socket, FIFO, shared memory, domain socket listener |
+| Abu Bakar | Subsystem 1, Flask Dashboard, OS Threading (execution layer) — thread pool, worker, session manager, sync |
 
 ---
 
