@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
-
-
-
 import psycopg2
 import numpy as np
-
-
 from sklearn.ensemble import RandomForestClassifier
 import shap
 import joblib
-
 import os
-
-
-
-
-
 
 # Database Configuration
 
