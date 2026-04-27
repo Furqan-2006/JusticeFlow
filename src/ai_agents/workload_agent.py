@@ -1,39 +1,3 @@
-"""
-workload_agent.py — Module 4: Officer Workload Balancer
-========================================================
-JusticeFlow AI Agent — Hungarian Algorithm (Combinatorial Optimization)
-
-Spawned by process_spawner via fork+exec every 6 hours.
-Connects to PostgreSQL as the justice_ai role:
-  - SELECT on public schema (Cases, Officers, Case_Officers)
-  - INSERT on analytics schema (Officer_Workload_Assignments, Model_Performance_Log)
-  - NO writes to any operational table, ever.
-
-Credentials are injected by process_spawner as environment variables
-before exec() — this script never reads a config file.
-
-Internal class structure (Architecture Markdown §Module 4):
-  DBRepository       — all psycopg2 SQL (Strategy: Repository)
-  CostMatrixBuilder  — 4-component weighted cost matrix (Strategy pattern)
-  HungarianSolver    — thin scipy wrapper (isolates solver dependency)
-  run_analysis()     — 7-stage Pipeline orchestrator
-
-FIFO Reporting Protocol (§FIFO Reporting Protocol):
-  Startup, post-write, and error messages written to named FIFO.
-  Scheduler reads non-blocking — a missed write is not fatal.
-
-Shared Memory Write (§Shared Memory Write):
-  agents[2] slot updated after write_suggestions() completes.
-  Index 2 = workload agent, per ipc_types.h convention.
-
-Error Handling (§Error Handling):
-  No exception bubbles out of run_analysis().
-  On exception: log stderr → FIFO error msg → shm error code → exit(1).
-
-Author : Muhammad Furqan Sheikh (24K-0527)
-Course : Artificial Intelligence — JusticeFlow AI Layer
-Date   : 2026
-"""
 
 from __future__ import annotations
 
