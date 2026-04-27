@@ -190,7 +190,9 @@ justiceflow/
 |   |   └── subsystem3.cpp                ← Implementation + routing to managers
 |
 ├── tests/
-|   ├── 
+|   ├── superviser_test.cpp
+|   ├── os_smoke_test.cpp
+|   ├── os_layer_integration_test.cpp
 |   └── db_test.cpp
 |
 ├── .gitignore

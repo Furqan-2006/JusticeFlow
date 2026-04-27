@@ -29,7 +29,10 @@ GRANT INSERT ON ALL TABLES IN SCHEMA analytics TO justice_ai;
 
 -- Application user: read analytics for dashboard
 GRANT USAGE ON SCHEMA analytics TO justice_app;
-GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO justice_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA analytics TO justice_ai;
+ALTER DEFAULT PRIVILEGES IN SCHEMA analytics
+GRANT USAGE, SELECT ON SEQUENCES TO justice_ai;
+
 
 -- AI agents have zero access to audit schema
 REVOKE ALL ON SCHEMA audit FROM justice_ai;
