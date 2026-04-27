@@ -1,123 +1,246 @@
 #pragma once
 
-#include <string>
+/**
+ * @file audit_query.h
+ * @brief Stateless query builder for audit.Audit_Log reads.
+ *
+ * Internal implementation detail of the audit module.
+ * External callers NEVER include this file — include audit_manager.h instead.
+ *
+ * Design Patterns
+ * ---------------
+ * Template Method:  _executeAndMap() is the skeleton shared by every public
+ *                   method. Each method supplies its own SQL and parameters;
+ *                   the skeleton executes, maps rows, manages PGresult lifetime.
+ *
+ * Observer (passive): The C++ layer is purely read-only. All writes to
+ *                   audit.Audit_Log happen through SECURITY DEFINER triggers —
+ *                   no application code ever INSERTs here. The trigger fires as
+ *                   the observer of every DML on the 8 audited tables.
+ *
+ * Thread Safety
+ * -------------
+ * All functions are stateless. Thread-safe by construction — no shared state.
+ *
+ * SQL Injection
+ * -------------
+ * All queries use PQexecParams with parameterised placeholders ($1, $2…).
+ * No string concatenation is ever used to build SQL.
+ *
+ * Memory
+ * ------
+ * PGresult* lifetime is managed entirely inside _executeAndMap.
+ * Callers never call PQclear.
+ *
+ * Dependencies
+ * ------------
+ * libpq (PGconn*, PQexecParams, PQclear), common/constants.h
+ */
+
 #include <vector>
 #include <ctime>
+#include <libpq-fe.h>
 #include "common/constants.h"
-#include "audit_log.h"
 
 namespace audit
 {
 
+    // -----------------------------------------------------------------------
+    // AuditRecord field-size constants
+    // These values mirror the column widths in audit.Audit_Log.
+    // Changing them requires a matching schema migration.
+    // -----------------------------------------------------------------------
+    constexpr int AUDIT_TABLE_NAME_LEN = 32; ///< e.g. "WARRANTS", "EVIDENCE"
+    constexpr int AUDIT_OPERATION_LEN = 16;  ///< "INSERT", "UPDATE", "DELETE"
+    constexpr int AUDIT_BELT_LEN = 32;       ///< Officer belt number string
+    constexpr int AUDIT_ADDR_LEN = 48;       ///< IPv6 max = 45 chars + NUL
+    constexpr int AUDIT_JSONB_LEN = 8192;    ///< JSONB snapshot of OLD/NEW row
+
     /**
-     * @struct CaseTimeline
-     * @brief Chronological view of all changes related to a case
+     * @struct AuditRecord
+     * @brief Plain data struct mirroring every column of audit.Audit_Log.
      *
-     * Combines audit records from all tables related to a case into a single
-     * structured timeline for dashboard display.
+     * Fixed-size char arrays throughout — no std::string.
+     * Safe to memcpy, pass across module boundaries, and serialise over IPC.
+     *
+     * Numeric IDs use int / time_t for direct comparison without parsing.
+     *
+     * Field mapping (struct ↔ column):
+     *   log_id       ← audit_log_id    (PK, SERIAL)
+     *   table_name   ← table_name      (VARCHAR 32)
+     *   record_pk    ← record_pk       (INTEGER — PK of the modified row)
+     *   operation    ← operation       (VARCHAR 16 — 'INSERT'/'UPDATE'/'DELETE')
+     *   officer_id   ← officer_id      (INTEGER — 0 for system/trigger)
+     *   belt_number  ← belt_number     (VARCHAR 32)
+     *   backend_pid  ← backend_pid     (INTEGER — pg_backend_pid())
+     *   client_addr  ← client_addr     (INET cast to TEXT)
+     *   old_values   ← old_values      (JSONB — NULL for INSERT)
+     *   new_values   ← new_values      (JSONB — NULL for DELETE)
+     *   changed_at   ← changed_at      (TIMESTAMPTZ cast to Unix epoch)
      */
-    struct CaseTimeline
+    struct AuditRecord
     {
-        int case_id;                               ///< Case ID
-        std::vector<AuditRecord> timeline_entries; ///< All changes in chronological order (oldest first)
-        int total_changes;                         ///< Total number of changes across all tables
-        time_t first_change;                       ///< Timestamp of first change (case creation)
-        time_t last_change;                        ///< Timestamp of last change (most recent)
+        int log_id;
+        char table_name[AUDIT_TABLE_NAME_LEN];
+        int record_pk;
+        char operation[AUDIT_OPERATION_LEN];
+        int officer_id;
+        char belt_number[AUDIT_BELT_LEN];
+        int backend_pid;
+        char client_addr[AUDIT_ADDR_LEN];
+        char old_values[AUDIT_JSONB_LEN];
+        char new_values[AUDIT_JSONB_LEN];
+        time_t changed_at;
     };
 
     /**
-     * @struct StationActivitySummary
-     * @brief Aggregated activity at a station during a time window
+     * @class AuditQuery
+     * @brief Stateless parameterised query executor for audit.Audit_Log.
      *
-     * Summary statistics of officer actions at a station.
+     * Never instantiated. All methods are static.
+     * Caller owns PGconn* — this class never touches the connection lifecycle.
      */
-    struct StationActivitySummary
-    {
-        int station_id;                            ///< Station ID
-        time_t period_from;                        ///< Start of time window
-        time_t period_to;                          ///< End of time window
-        int total_officers_active;                 ///< Unique officers who took actions
-        int total_actions;                         ///< Total number of audit-logged actions
-        int inserts;                               ///< Count of INSERT actions
-        int updates;                               ///< Count of UPDATE actions
-        int deletes;                               ///< Count of DELETE actions (soft-deletes)
-        std::vector<AuditRecord> activity_records; ///< All audit records in window
-    };
-
-    /**
-     * @file audit_query.h
-     * @brief Higher-level audit query composition
-     *
-     * Built on top of audit_log.h, composes multiple queries into
-     * structured results for dashboard consumption.
-     *
-     * Thread Safety: All functions are read-only and thread-safe.
-     *
-     * Dependencies: audit_log.h, utils/time_utils.h
-     */
-
     class AuditQuery
     {
     public:
         /**
-         * Retrieves the full chronological timeline of a case.
+         * Retrieves all audit log entries related to a case.
          *
-         * Joins change history across all audited tables related to a case
-         * (cases, evidence, warrants, arrests, etc.) into a single chronological view.
+         * Covers the case row itself plus every linked entity:
+         *   Evidence, Warrants, Arrests, Bail_Records, Charge_Sheets, Accused.
+         * Returned newest-first.
          *
-         * Timeline is ordered oldest-to-newest for chronological narrative.
-         * Useful for:
-         *   - Dashboard case history tab
-         *   - Compliance audits
-         *   - Forensic investigation (tracking case evolution)
-         *
-         * @param case_id The case to query
-         * @param out_timeline Output structure populated with timeline entries
-         * @return ResultCode::OK on success
-         *         ResultCode::NOT_FOUND if case doesn't exist or has no audit history
-         *         ResultCode::DB_ERROR on query failure
-         *
-         * @example
-         *   CaseTimeline timeline;
-         *   auto result = AuditQuery::getFullCaseTimeline(case_id, timeline);
-         *   if (result == ResultCode::OK) {
-         *       // Display timeline[0] (oldest) to timeline[n] (newest)
-         *       for (const auto& entry : timeline.timeline_entries) {
-         *           dashboard.display(entry.changed_at, entry.action, entry.old_value, entry.new_value);
-         *       }
-         *   }
+         * @param conn   Active PostgreSQL connection. Must not be NULL.
+         * @param case_id  Primary key of the case.
+         * @param out    Vector appended with matching AuditRecords.
+         * @return ResultCode::OK            — records found and mapped
+         *         ResultCode::NOT_FOUND     — no audit history for case_id
+         *         ResultCode::DB_ERROR      — PQexecParams returned an error status
          */
-        static JusticeFlow::ResultCode getFullCaseTimeline(int case_id, CaseTimeline &out_timeline);
+        static JusticeFlow::ResultCode getChangeHistory(
+            PGconn *conn, int case_id,
+            std::vector<AuditRecord> &out);
 
         /**
-         * Retrieves aggregated activity at a station during a time window.
+         * Retrieves all actions taken by a single officer in [from, to].
          *
-         * Queries all officer actions at a station and returns:
-         *   - Total unique officers who acted
-         *   - Action counts by type (INSERT, UPDATE, DELETE)
-         *   - Full list of records for detailed view
+         * Results are newest-first within the time window.
          *
-         * Useful for:
-         *   - Station activity dashboard
-         *   - Workload analysis
-         *   - Shift summaries
-         *
-         * @param station_id The station to query
-         * @param from Start time (UTC) — inclusive
-         * @param to End time (UTC) — inclusive
-         * @param out_summary Output structure populated with activity data
-         * @return ResultCode::OK on success
-         *         ResultCode::NOT_FOUND if station has no activity in window
-         *         ResultCode::DB_ERROR on query failure
-         *
-         * @note Implementation:
-         *       1. Query all officers at station
-         *       2. For each officer, call AuditLog::getOfficerActions(officer_id, from, to)
-         *       3. Aggregate results and count by action type
-         *       4. Return summary + full record list
+         * @param conn       Active PostgreSQL connection.
+         * @param officer_id Officer whose actions are requested.
+         * @param from       Inclusive start of the window (Unix epoch, UTC).
+         * @param to         Inclusive end of the window (Unix epoch, UTC).
+         * @param out        Vector appended with matching AuditRecords.
+         * @return ResultCode::OK / NOT_FOUND / DB_ERROR
          */
-        static JusticeFlow::ResultCode getStationActivity(int station_id, time_t from, time_t to,
-                                                          StationActivitySummary &out_summary);
+        static JusticeFlow::ResultCode getOfficerActions(
+            PGconn *conn, int officer_id, time_t from, time_t to,
+            std::vector<AuditRecord> &out);
+
+        /**
+         * Retrieves the full mutation history of a single record.
+         *
+         * @param conn        Active PostgreSQL connection.
+         * @param table_name  Audited table name (e.g. "WARRANTS").
+         * @param record_id   Primary key of the record.
+         * @param out         Vector appended (oldest-first — chronological narrative).
+         * @return ResultCode::OK / NOT_FOUND / DB_ERROR
+         */
+        static JusticeFlow::ResultCode getTableChanges(
+            PGconn *conn, const char *table_name, int record_id,
+            std::vector<AuditRecord> &out);
+
+        /**
+         * Broad dump of all audit activity within a time window.
+         *
+         * For large windows (> 30 days) consider adding table_name filtering
+         * at the call site to cap result set size. Returned newest-first.
+         *
+         * @param conn  Active PostgreSQL connection.
+         * @param from  Inclusive start (Unix epoch, UTC).
+         * @param to    Inclusive end (Unix epoch, UTC).
+         * @param out   Vector appended with matching AuditRecords.
+         * @return ResultCode::OK / NOT_FOUND / DB_ERROR
+         */
+        static JusticeFlow::ResultCode queryByTimeWindow(
+            PGconn *conn, time_t from, time_t to,
+            std::vector<AuditRecord> &out);
+
+        /**
+         * SQL-level suspicious activity detection for a station.
+         *
+         * Returns AuditRecords that match one or more of the four detection
+         * patterns. The caller inspects each record to determine which pattern
+         * triggered it (using operation, backend_pid, changed_at fields).
+         *
+         * Detection patterns (all evaluated over the last 24 hours):
+         *
+         * 1. BULK_CHANGE
+         *    More than 20 rows written by a single backend_pid within any
+         *    one-hour window. Detected via GROUP BY + HAVING in SQL.
+         *    Indicator: batch data manipulation.
+         *
+         * 2. RAPID_DELETE
+         *    Five or more DELETE operations by the same officer_id within
+         *    any five-minute window. Especially concerning on EVIDENCE or
+         *    WARRANTS tables.
+         *    Indicator: evidence tampering.
+         *
+         * 3. AFTER_HOURS
+         *    Any operation performed outside 06:00–22:00 UTC.
+         *    Severity increases if the operation is a DELETE or touches CASES.
+         *
+         * 4. JURISDICTION_VIOLATION
+         *    An officer whose station_id (from subsystem1.officers) does not
+         *    match the station of the record being modified.
+         *    Indicator: unauthorised cross-station access.
+         *
+         * @param conn        Active PostgreSQL connection.
+         * @param station_id  Station to analyse.
+         * @param out         Vector appended with flagged AuditRecords.
+         * @return ResultCode::OK (even if out is empty — no findings is valid)
+         *         ResultCode::DB_ERROR on query failure
+         */
+        static JusticeFlow::ResultCode detectSuspiciousActivity(
+            PGconn *conn, int station_id,
+            std::vector<AuditRecord> &out);
+
+    private:
+        /**
+         * @brief Template Method skeleton — shared by every public query.
+         *
+         * Executes a parameterised SQL statement via PQexecParams, maps every
+         * result row into an AuditRecord, appends to out, and calls PQclear.
+         * Callers never touch PGresult* directly.
+         *
+         * @param conn     Active PostgreSQL connection.
+         * @param sql      Parameterised SQL string ($1, $2, … placeholders).
+         * @param params   Array of C-string parameter values (may be NULL).
+         * @param nparams  Length of params array (0 if params is NULL).
+         * @param out      Output vector — rows appended here.
+         * @return ResultCode::OK      — at least one row found and mapped
+         *         ResultCode::NOT_FOUND — PGRES_TUPLES_OK but zero rows
+         *         ResultCode::DB_ERROR  — PGRES_FATAL_ERROR or connection error
+         */
+        static JusticeFlow::ResultCode _executeAndMap(
+            PGconn *conn,
+            const char *sql,
+            const char *const *params,
+            int nparams,
+            std::vector<AuditRecord> &out);
+
+        /**
+         * @brief Maps a single PGresult row into an AuditRecord.
+         *
+         * Column-to-field mapping is positional and matches the SELECT column
+         * order defined in each SQL constant inside audit_query.cpp.
+         * Changing the SQL SELECT list requires updating this function too.
+         *
+         * @param res  PGresult* from a successful PQexecParams call.
+         * @param row  Zero-based row index.
+         * @param rec  Output record (fields overwritten, not appended).
+         */
+        static void _mapRow(PGresult *res, int row, AuditRecord &rec);
     };
 
 } // namespace audit
