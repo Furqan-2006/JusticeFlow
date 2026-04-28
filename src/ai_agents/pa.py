@@ -1,95 +1,55 @@
 #!/usr/bin/env python3
+import os
+import json
 import psycopg2
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-import shap
-import joblib
-import os
-from datetime import datetime
 
-# ---------------------------------------------------------
-# Database Configuration
-# ---------------------------------------------------------
-DB_NAME = "justiceflow"
-DB_USER = "justiceflow"
-DB_PASS = "justiceflow123"
-DB_HOST = "localhost"
+DB_NAME = os.getenv("JF_DB_NAME", "justiceflow")
+DB_USER = os.getenv("JF_DB_USER", "justice_ai")
+DB_PASS = os.getenv("JF_DB_PASS", "")
+DB_HOST = os.getenv("JF_DB_HOST", "/var/run/postgresql")
+DB_PORT = os.getenv("JF_DB_PORT", "5432")
 
-MODEL_PATH = "ai/models/priority_rf.pkl"
+MODEL_VERSION = "RULES-v1.0"
+ALGORITHM = "HeuristicScoring"
 
-# Minimal feature set (matches your current DB query)
-FEATURE_NAMES = ["days_open", "evidence_count", "severity_score", "prior_convictions"]
+CASE_TYPE_SEVERITY = {
+    "MURDER": 1.00,
+    "RAPE": 0.95,
+    "KIDNAPPING": 0.90,
+    "ROBBERY": 0.75,
+    "ASSAULT": 0.70,
+    "FRAUD": 0.60,
+    "BURGLARY": 0.55,
+    "THEFT": 0.45,
+}
 
 def get_db_connection():
     try:
-        return psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST)
+        return psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            host=DB_HOST,
+            port=DB_PORT,
+        )
     except Exception as e:
         print(f"[AI: Priority] DB Connection Failed: {e}")
         return None
 
-def _analytics_table_exists(cur, table_fqtn: str) -> bool:
-    try:
-        cur.execute("SELECT to_regclass(%s);", (table_fqtn,))
-        return cur.fetchone()[0] is not None
-    except Exception:
-        return False
+def clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
 
-def _save_priority_outputs_if_possible(cur, outputs):
-    """
-    Writes to analytics.case_priority only if table exists.
-    Expected simple schema:
-      analytics.case_priority(
-        run_at timestamptz,
-        case_id int,
-        priority_label int,
-        priority_proba double precision,
-        shap_top_features text
-      )
-    """
-    if not _analytics_table_exists(cur, "analytics.case_priority"):
-        return False
+def priority_level(score: float) -> str:
+    if score >= 0.75:
+        return "HIGH"
+    if score >= 0.50:
+        return "MEDIUM"
+    return "LOW"
 
-    run_at = datetime.utcnow()
-    # Keep it simple: replace the table each run
-    cur.execute("DELETE FROM analytics.case_priority;")
-    for o in outputs:
-        cur.execute(
-            """
-            INSERT INTO analytics.case_priority(run_at, case_id, priority_label, priority_proba, shap_top_features)
-            VALUES (%s, %s, %s, %s, %s);
-            """,
-            (run_at, o["case_id"], o["priority_label"], o["priority_proba"], o["shap_top_features"])
-        )
-    return True
+def run_priority():
+    print("[AI: Priority] Scoring open cases (INSERT-only; matches justice_ai permissions)...")
 
-def _load_or_train_model(X, y):
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-    if os.path.exists(MODEL_PATH):
-        try:
-            model = joblib.load(MODEL_PATH)
-            print(f"[AI: Priority] Loaded cached model from {MODEL_PATH}")
-            return model
-        except Exception as e:
-            print(f"[AI: Priority] Failed to load cached model; retraining. Reason: {e}")
-
-    # Train a small, stable RF (not over-engineered)
-    model = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
-    model.fit(X, y)
-    joblib.dump(model, MODEL_PATH)
-    print(f"[AI: Priority] Trained and saved model to {MODEL_PATH}")
-    return model
-
-def train_and_score_priority():
-    """
-    Meets proposal expectations:
-      - trains with a basic train/test split and prints accuracy
-      - SHAP explainability available
-      - can score OPEN cases and (optionally) persist into analytics schema
-    """
-    print("[AI: Priority] Training/Loading Random Forest + SHAP explainability...")
     conn = get_db_connection()
     if not conn:
         return
@@ -98,112 +58,117 @@ def train_and_score_priority():
     try:
         cur = conn.cursor()
 
-        # 1) Training data from CLOSED cases (historical)
         cur.execute("""
-            SELECT days_open, evidence_count, severity_score, prior_convictions, is_high_priority
-            FROM Cases
-            WHERE status = 'CLOSED'
-              AND days_open IS NOT NULL
-              AND evidence_count IS NOT NULL
-              AND severity_score IS NOT NULL
-              AND prior_convictions IS NOT NULL
-              AND is_high_priority IS NOT NULL;
+            WITH ev AS (
+                SELECT case_id, COUNT(*)::int AS evidence_count
+                FROM Evidence
+                WHERE is_deleted = FALSE
+                GROUP BY case_id
+            )
+            SELECT
+                c.case_id,
+                c.case_type::text,
+                GREATEST(0, (CURRENT_DATE - c.filed_at::date))::int AS days_open,
+                COALESCE(ev.evidence_count, 0) AS evidence_count
+            FROM Cases c
+            LEFT JOIN ev ON ev.case_id = c.case_id
+            WHERE c.case_status <> 'CLOSED';
         """)
         rows = cur.fetchall()
 
-        if len(rows) < 20:
-            print("[AI: Priority] Insufficient historical data. Need at least 20 closed cases with labels.")
+        if not rows:
+            print("[AI: Priority] No open cases found.")
             return
-
-        data = np.array(rows, dtype=float)
-        X = data[:, :-1]
-        y = data[:, -1].astype(int)
-
-        # 2) Simple hold-out evaluation (proposal: accuracy threshold etc.)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y if len(set(y)) > 1 else None
-        )
-
-        model = _load_or_train_model(X_train, y_train)
-
-        y_pred = model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        print(f"[AI: Priority] Hold-out accuracy: {acc:.3f}")
-        # Print a compact report (helps instructor verify)
-        try:
-            print("[AI: Priority] Classification report:")
-            print(classification_report(y_test, y_pred, digits=3))
-        except Exception:
-            pass
-
-        # 3) SHAP explainer (TreeExplainer is appropriate for RF)
-        explainer = shap.TreeExplainer(model)
-
-        # 4) Score OPEN cases and produce explanations
-        cur.execute("""
-            SELECT case_id, days_open, evidence_count, severity_score, prior_convictions
-            FROM Cases
-            WHERE status != 'CLOSED'
-              AND days_open IS NOT NULL
-              AND evidence_count IS NOT NULL
-              AND severity_score IS NOT NULL
-              AND prior_convictions IS NOT NULL;
-        """)
-        open_rows = cur.fetchall()
-        if not open_rows:
-            print("[AI: Priority] No open cases found to score.")
-            return
-
-        case_ids = [int(r[0]) for r in open_rows]
-        X_open = np.array([r[1:] for r in open_rows], dtype=float)
-
-        # Probabilities for "high priority" class (assumes binary labels 0/1)
-        if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(X_open)[:, 1]
-        else:
-            # fallback (shouldn't happen for RF)
-            proba = model.predict(X_open).astype(float)
-
-        pred_label = (proba >= 0.5).astype(int)
-
-        # SHAP values: for binary RF, shap may return list [class0, class1] or array
-        shap_values = explainer.shap_values(X_open)
-        if isinstance(shap_values, list) and len(shap_values) == 2:
-            shap_for_positive = shap_values[1]
-        else:
-            shap_for_positive = shap_values
 
         outputs = []
-        for i, cid in enumerate(case_ids):
-            # pick top 3 features by absolute SHAP contribution
-            contrib = shap_for_positive[i]
-            order = np.argsort(np.abs(contrib))[::-1][:3]
-            top_feats = ", ".join([f"{FEATURE_NAMES[j]}({contrib[j]:+.3f})" for j in order])
+        for case_id, case_type, days_open, evidence_count in rows:
+            case_type = str(case_type)
 
-            outputs.append({
-                "case_id": cid,
-                "priority_label": int(pred_label[i]),
-                "priority_proba": float(proba[i]),
-                "shap_top_features": top_feats
-            })
+            severity_score = float(CASE_TYPE_SEVERITY.get(case_type, 0.50))
+            prior_convictions = 0
 
-        # Sort by probability descending (ranked queue)
-        outputs.sort(key=lambda o: o["priority_proba"], reverse=True)
+            days_norm = clamp01(float(days_open) / 120.0)
+            evidence_norm = clamp01(float(evidence_count) / 10.0)
+            low_evidence = 1.0 - evidence_norm
 
-        print("[AI: Priority] Top 10 open cases by priority probability:")
-        for o in outputs[:10]:
-            print(f" -> Case {o['case_id']}: P(high)={o['priority_proba']:.3f} | label={o['priority_label']} | why: {o['shap_top_features']}")
+            w_sev, w_days, w_low_ev = 0.55, 0.30, 0.15
+            score = clamp01(w_sev * severity_score + w_days * days_norm + w_low_ev * low_evidence)
+            level = priority_level(score)
 
-        # Optional persistence into analytics schema if table exists
-        wrote = _save_priority_outputs_if_possible(cur, outputs)
-        if wrote:
-            conn.commit()
-            print("[AI: Priority] Saved outputs to analytics.case_priority")
-        else:
-            print("[AI: Priority] analytics.case_priority not found; skipping DB write (printing only).")
+            feature_contributions = {
+                "severity_score": round(w_sev * severity_score, 6),
+                "days_open": round(w_days * days_norm, 6),
+                "low_evidence": round(w_low_ev * low_evidence, 6),
+                "prior_convictions": 0.0,
+            }
+
+            input_features = {
+                "case_type": case_type,
+                "severity_score": round(severity_score, 4),
+                "days_open": int(days_open),
+                "evidence_count": int(evidence_count),
+                "prior_convictions": int(prior_convictions),
+            }
+
+            reason_bits = []
+            if severity_score >= 0.75:
+                reason_bits.append(f"High severity ({case_type})")
+            if days_open >= 60:
+                reason_bits.append(f"Open for {days_open} days")
+            if evidence_count <= 1:
+                reason_bits.append(f"Low evidence ({evidence_count})")
+            top_reason = "; ".join(reason_bits) if reason_bits else f"type={case_type}, days_open={days_open}, evidence={evidence_count}"
+
+            suggested_action = (
+                "Assign additional investigator immediately"
+                if level == "HIGH" else
+                "Review within 24 hours"
+                if level == "MEDIUM" else
+                "Normal workflow"
+            )
+
+            # INSERT ONLY (justice_ai has INSERT, not DELETE/UPDATE)
+            cur.execute(
+                """
+                INSERT INTO analytics.Case_Priority_Scores (
+                    case_id, priority_level, priority_score,
+                    feature_contributions, top_reason, suggested_action,
+                    input_features,
+                    model_version, algorithm, model_accuracy
+                )
+                VALUES (
+                    %s, %s, %s,
+                    %s::jsonb, %s, %s,
+                    %s::jsonb,
+                    %s, %s, %s
+                );
+                """,
+                (
+                    int(case_id),
+                    level,
+                    round(float(score), 4),
+                    json.dumps(feature_contributions),
+                    top_reason,
+                    suggested_action,
+                    json.dumps(input_features),
+                    MODEL_VERSION,
+                    ALGORITHM,
+                    None,
+                )
+            )
+
+            outputs.append((int(case_id), float(score), case_type, int(days_open), int(evidence_count)))
+
+        conn.commit()
+
+        outputs.sort(key=lambda t: t[1], reverse=True)
+        print("[AI: Priority] Top 10 open cases:")
+        for cid, s, ctype, d, evc in outputs[:10]:
+            print(f" -> Case {cid}: score={s:.3f} level={priority_level(s)} type={ctype} days_open={d} evidence={evc}")
 
     except Exception as e:
         print(f"[AI: Priority] Execution Error: {e}")
+        conn.rollback()
     finally:
         try:
             if cur:
@@ -212,4 +177,4 @@ def train_and_score_priority():
             conn.close()
 
 if __name__ == "__main__":
-    train_and_score_priority()
+    run_priority()
