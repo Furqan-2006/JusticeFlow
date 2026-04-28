@@ -33,7 +33,7 @@
 #include <vector>
 #include <cstdint>
 #include <ctime>
-#include <libpq-fe.h>
+#include <postgresql/libpq-fe.h>
 #include "common/constants.h"
 #include "common/common.h"
 

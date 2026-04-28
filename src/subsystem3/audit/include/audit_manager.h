@@ -42,7 +42,7 @@
 
 #include <vector>
 #include <ctime>
-#include <libpq-fe.h>
+#include <postgresql/libpq-fe.h>
 #include "common/constants.h"
 #include "audit/include/audit_query.h" // exposes AuditRecord to callers
 

@@ -150,7 +150,6 @@ justiceflow/
 |   │   │       ├── session_store.cpp
 |   │   │       ├── duty_cache.cpp
 |   │   │       └── token_generator.cpp
-
 |   |
 |   ├── subsystem1/
 |   ├── subsystem2/
@@ -180,11 +179,6 @@ justiceflow/
 |   |   │   └── src/
 |   |   │       ├── forensic_manager.cpp
 |   |   │       └── forensic_repository.cpp
-|   |   │
-|   |   ├── sql/
-|   |   │   ├── audit_triggers.sql        ← SECURITY DEFINER trigger + immutability enforcement
-|   |   │   ├── enforcement_jobs.sql      ← expire_warrants() + expire_bail_records() SQL functions
-|   |   │   └── forensic_triggers.sql     ← evidence status sync triggers
 |   |   │
 |   |   ├── subsystem3.h                  ← public API
 |   |   └── subsystem3.cpp                ← Implementation + routing to managers
