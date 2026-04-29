@@ -11,7 +11,7 @@
  *   - Facade    : this file; thin delegation layer.
  *   - Strategy  : CaseManager internally selects a CaseTransitionStrategy.
  *   - Observer  : EvidenceMgr notifies audit/AI observers (inside CaseManager).
- *   - Factory   : OfficerManager::generateReport() uses ReportFactory internally.
+ *   - Factory   : generateReport() uses ReportFactory internally.
  */
 
 #include "subsystem1.h"
@@ -44,7 +44,7 @@ namespace subsystem1
         int &out_case_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::registerCase(
+        return registerCase(
             conn, session, case_type, incident_date,
             incident_address, description, lat, lon,
             station_id, complainant_cnic,
@@ -56,7 +56,7 @@ namespace subsystem1
         int case_id,
         JusticeFlow::Case &out)
     {
-        return CaseManager::getCaseById(conn, case_id, out);
+        return getCaseById(conn, case_id, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getCasesByStation(
@@ -64,7 +64,7 @@ namespace subsystem1
         int station_id,
         std::vector<JusticeFlow::Case> &out)
     {
-        return CaseManager::getCasesByStation(conn, station_id, out);
+        return getCasesByStation(conn, station_id, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getCasesByStatus(
@@ -73,7 +73,7 @@ namespace subsystem1
         JusticeFlow::CaseStatus status,
         std::vector<JusticeFlow::Case> &out)
     {
-        return CaseManager::getCasesByStatus(conn, station_id, status, out);
+        return getCasesByStatus(conn, station_id, status, out);
     }
 
     // ============================================================
@@ -88,7 +88,7 @@ namespace subsystem1
         const char *reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::updateCaseStatus(
+        return updateCaseStatus(
             conn, session, case_id, new_status, reason, out_code);
     }
 
@@ -99,7 +99,7 @@ namespace subsystem1
         const char *closure_reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::closeCase(
+        return closeCase(
             conn, session, case_id, closure_reason, out_code);
     }
 
@@ -110,7 +110,7 @@ namespace subsystem1
         const char *reopen_reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::reopenCase(
+        return reopenCase(
             conn, session, case_id, reopen_reason, out_code);
     }
 
@@ -122,7 +122,7 @@ namespace subsystem1
         const char *transfer_reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::transferCase(
+        return transferCase(
             conn, session, case_id, to_station_id, transfer_reason, out_code);
     }
 
@@ -131,7 +131,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::CaseStatusLog> &out)
     {
-        return CaseManager::getCaseStatusLog(conn, case_id, out);
+        return getCaseStatusLog(conn, case_id, out);
     }
 
     // ============================================================
@@ -146,7 +146,7 @@ namespace subsystem1
         JusticeFlow::CaseOfficerRole role,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::assignOfficerToCase(
+        return assignOfficerToCase(
             conn, session, case_id, officer_id, role, out_code);
     }
 
@@ -157,7 +157,7 @@ namespace subsystem1
         int officer_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::relieveOfficerFromCase(
+        return relieveOfficerFromCase(
             conn, session, case_id, officer_id, out_code);
     }
 
@@ -166,7 +166,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::CaseOfficer> &out)
     {
-        return CaseManager::getAssignedOfficers(conn, case_id, out);
+        return getAssignedOfficers(conn, case_id, out);
     }
 
     // ============================================================
@@ -183,7 +183,7 @@ namespace subsystem1
         int &out_complainant_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::addComplainant(
+        return addComplainant(
             conn, session, case_id, person_cnic,
             relation, notify_on_update,
             out_complainant_id, out_code);
@@ -197,7 +197,7 @@ namespace subsystem1
         const char *reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::updateComplainantStatus(
+        return updateComplainantStatus(
             conn, session, complainant_id, new_status, reason, out_code);
     }
 
@@ -206,7 +206,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::Complainant> &out)
     {
-        return CaseManager::getComplainantsByCase(conn, case_id, out);
+        return getComplainantsByCase(conn, case_id, out);
     }
 
     // ============================================================
@@ -225,7 +225,7 @@ namespace subsystem1
         int &out_victim_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::addVictim(
+        return addVictim(
             conn, session, case_id, person_cnic,
             injury_type, injury_severity, vulnerability,
             medical_report_ref, out_victim_id, out_code);
@@ -236,7 +236,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::Victim> &out)
     {
-        return CaseManager::getVictimsByCase(conn, case_id, out);
+        return getVictimsByCase(conn, case_id, out);
     }
 
     // ============================================================
@@ -255,7 +255,7 @@ namespace subsystem1
         int &out_witness_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::addWitness(
+        return addWitness(
             conn, session, case_id, person_cnic,
             statement_text, statement_file_path,
             protection_status, conceal_identity,
@@ -269,7 +269,7 @@ namespace subsystem1
         JusticeFlow::WitnessProtection new_status,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::updateWitnessProtection(
+        return updateWitnessProtection(
             conn, session, witness_id, new_status, out_code);
     }
 
@@ -278,7 +278,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::Witness> &out)
     {
-        return CaseManager::getWitnessesByCase(conn, case_id, out);
+        return getWitnessesByCase(conn, case_id, out);
     }
 
     // ============================================================
@@ -294,7 +294,7 @@ namespace subsystem1
         int &out_accused_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::addAccused(
+        return addAccused(
             conn, session, case_id, person_cnic,
             involvement, out_accused_id, out_code);
     }
@@ -307,7 +307,7 @@ namespace subsystem1
         JusticeFlow::AssociationType association_type,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::linkAccusedAssociation(
+        return linkAccusedAssociation(
             conn, session, accused_id, associated_accused_id,
             association_type, out_code);
     }
@@ -317,7 +317,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::Accused> &out)
     {
-        return CaseManager::getAccusedByCase(conn, case_id, out);
+        return getAccusedByCase(conn, case_id, out);
     }
 
     // ============================================================
@@ -333,7 +333,7 @@ namespace subsystem1
         const char *condition_notes,
         JusticeFlow::ResultCode &out_code)
     {
-        return CaseManager::linkVehicleToCase(
+        return linkVehicleToCase(
             conn, session, case_id, vehicle_id,
             role, condition_notes, out_code);
     }
@@ -343,7 +343,7 @@ namespace subsystem1
         int case_id,
         std::vector<JusticeFlow::VehicleCase> &out)
     {
-        return CaseManager::getVehiclesByCase(conn, case_id, out);
+        return getVehiclesByCase(conn, case_id, out);
     }
 
     // ============================================================
@@ -363,7 +363,7 @@ namespace subsystem1
         int &out_duty_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::scheduleDuty(
+        return scheduleDuty(
             conn, session, officer_id, station_id, patrol_route_id,
             shift_type, duty_date, scheduled_start, scheduled_end,
             out_duty_id, out_code);
@@ -375,7 +375,7 @@ namespace subsystem1
         int duty_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::markDutyStart(conn, session, duty_id, out_code);
+        return markDutyStart(conn, session, duty_id, out_code);
     }
 
     bool Subsystem1::markDutyEnd(
@@ -384,7 +384,7 @@ namespace subsystem1
         int duty_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::markDutyEnd(conn, session, duty_id, out_code);
+        return markDutyEnd(conn, session, duty_id, out_code);
     }
 
     bool Subsystem1::updateDutyStatus(
@@ -395,7 +395,7 @@ namespace subsystem1
         const char *absence_reason,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::updateDutyStatus(
+        return updateDutyStatus(
             conn, session, duty_id, new_status, absence_reason, out_code);
     }
 
@@ -405,7 +405,7 @@ namespace subsystem1
         int duty_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::cancelDuty(conn, session, duty_id, out_code);
+        return cancelDuty(conn, session, duty_id, out_code);
     }
 
     // ============================================================
@@ -418,7 +418,7 @@ namespace subsystem1
         const char *duty_date,
         std::vector<JusticeFlow::DutyRoster> &out)
     {
-        return DutyManager::getDutyRoster(conn, station_id, duty_date, out);
+        return getDutyRoster(conn, station_id, duty_date, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getActiveDuties(
@@ -426,7 +426,7 @@ namespace subsystem1
         int station_id,
         std::vector<JusticeFlow::DutyRoster> &out)
     {
-        return DutyManager::getActiveDuties(conn, station_id, out);
+        return getActiveDuties(conn, station_id, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficerDutyHistory(
@@ -436,7 +436,7 @@ namespace subsystem1
         time_t to,
         std::vector<JusticeFlow::DutyRoster> &out)
     {
-        return DutyManager::getOfficerDutyHistory(conn, officer_id, from, to, out);
+        return getOfficerDutyHistory(conn, officer_id, from, to, out);
     }
 
     // ============================================================
@@ -453,7 +453,7 @@ namespace subsystem1
         int &out_route_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::createPatrolRoute(
+        return createPatrolRoute(
             conn, session, station_id, beat_code,
             route_name, area_description,
             out_route_id, out_code);
@@ -465,7 +465,7 @@ namespace subsystem1
         int route_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return DutyManager::deactivatePatrolRoute(conn, session, route_id, out_code);
+        return deactivatePatrolRoute(conn, session, route_id, out_code);
     }
 
     JusticeFlow::ResultCode Subsystem1::getPatrolRoutesByStation(
@@ -473,7 +473,7 @@ namespace subsystem1
         int station_id,
         std::vector<JusticeFlow::PatrolRoute> &out)
     {
-        return DutyManager::getPatrolRoutesByStation(conn, station_id, out);
+        return getPatrolRoutesByStation(conn, station_id, out);
     }
 
     // ============================================================
@@ -485,7 +485,7 @@ namespace subsystem1
         int officer_id,
         JusticeFlow::Officer &out)
     {
-        return OfficerManager::getOfficerById(conn, officer_id, out);
+        return getOfficerById(conn, officer_id, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficerByCnic(
@@ -493,7 +493,7 @@ namespace subsystem1
         const char *cnic,
         JusticeFlow::Officer &out)
     {
-        return OfficerManager::getOfficerByCnic(conn, cnic, out);
+        return getOfficerByCnic(conn, cnic, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficersByStation(
@@ -501,7 +501,7 @@ namespace subsystem1
         int station_id,
         std::vector<JusticeFlow::Officer> &out)
     {
-        return OfficerManager::getOfficersByStation(conn, station_id, out);
+        return getOfficersByStation(conn, station_id, out);
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficersByStatus(
@@ -510,7 +510,7 @@ namespace subsystem1
         JusticeFlow::OfficerStatus status,
         std::vector<JusticeFlow::Officer> &out)
     {
-        return OfficerManager::getOfficersByStatus(conn, station_id, status, out);
+        return getOfficersByStatus(conn, station_id, status, out);
     }
 
     // ============================================================
@@ -524,7 +524,7 @@ namespace subsystem1
         JusticeFlow::OfficerStatus new_status,
         JusticeFlow::ResultCode &out_code)
     {
-        return OfficerManager::updateOfficerStatus(
+        return updateOfficerStatus(
             conn, session, officer_id, new_status, out_code);
     }
 
@@ -540,7 +540,7 @@ namespace subsystem1
         int &out_history_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return OfficerManager::promoteOfficer(
+        return promoteOfficer(
             conn, session, officer_id, new_rank,
             new_belt_number, promotion_type,
             effective_date, order_date,
@@ -552,7 +552,7 @@ namespace subsystem1
         int officer_id,
         std::vector<JusticeFlow::OfficerRankHistory> &out)
     {
-        return OfficerManager::getOfficerRankHistory(conn, officer_id, out);
+        return getOfficerRankHistory(conn, officer_id, out);
     }
 
     // ============================================================
@@ -571,7 +571,7 @@ namespace subsystem1
         int &out_deployment_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return OfficerManager::deployOfficer(
+        return deployOfficer(
             conn, session, officer_id, to_station_id,
             deployment_reason, order_number,
             deployed_from, deployed_until,
@@ -584,7 +584,7 @@ namespace subsystem1
         int deployment_id,
         JusticeFlow::ResultCode &out_code)
     {
-        return OfficerManager::endDeployment(conn, session, deployment_id, out_code);
+        return endDeployment(conn, session, deployment_id, out_code);
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficerDeployments(
@@ -593,7 +593,7 @@ namespace subsystem1
         bool active_only,
         std::vector<JusticeFlow::OfficerDeployment> &out)
     {
-        return OfficerManager::getOfficerDeployments(conn, officer_id, active_only, out);
+        return getOfficerDeployments(conn, officer_id, active_only, out);
     }
 
     // ============================================================
@@ -607,8 +607,23 @@ namespace subsystem1
         JusticeFlow::ReportType type,
         std::string &out_report_text)
     {
-        return OfficerManager::generateReport(
-            conn, session, officer_id, type, out_report_text);
+        // Use the ReportFactory to create the requested report, generate it,
+        // and return a success code. The session and conn may be used by
+        // concrete implementations later; currently we generate the report
+        // via the factory and return OK.
+        JusticeFlow::Report *r = JusticeFlow::ReportFactory::create_report(type);
+        if (!r)
+        {
+            out_report_text.clear();
+            return JusticeFlow::ResultCode::DB_ERROR;
+        }
+
+        r->generate(officer_id);
+        // Concrete Report::generate currently writes to external sinks;
+        // we provide a simple acknowledgement string here.
+        out_report_text = "Report generated";
+        delete r;
+        return JusticeFlow::ResultCode::OK;
     }
 
 } // namespace subsystem1
