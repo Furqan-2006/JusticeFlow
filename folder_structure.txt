@@ -152,7 +152,51 @@ justiceflow/
 |   │   │       └── token_generator.cpp
 |   |
 |   ├── subsystem1/
+|   |   ├── include/
+|   |   |   ├── case_manager.h
+|   |   |   ├── case_strategy.h
+|   |   |   ├── evidence_mgr.h
+|   |   |   ├── observer.h
+|   |   |   ├── office_mgr.h
+|   |   |   └── report_factory.h
+|   |   |     
+|   |   ├── src/
+|   |   |   ├── case_manager.cpp
+|   |   |   ├── case_strategy.cpp
+|   |   |   ├── evidence_mgr.cpp
+|   |   |   ├── observer.cpp
+|   |   |   ├── office_mgr.cpp
+|   |   |   └── report_factory.cpp
+|   |   |     
+|   |   ├── subsystem1.h
+|   |   └── subsystem1.cpp 
+|   |   
 |   ├── subsystem2/
+|   |   ├── include/
+|   |   |   ├── controllers/
+|   |   |   |   ├── CaseManager.h
+|   |   |   |   ├── EvidenceManager.h
+|   |   |   |   └── InvestigationManager.h
+|   |   |   ├── models/
+|   |   |   |   ├── Case.h
+|   |   |   |   ├── Evidence.h
+|   |   |   |   └── ChargeSheet.h
+|   |   |   ├── patterns/
+|   |   |   |   ├── ICaseStatusStrategy.h
+|   |   |   |   └── IEvidenceObserver.h
+|   |   |   └── s2_types.h
+|   |   ├── src/ 
+|   |   |   ├── controllers/
+|   |   |   |   ├── CaseManager.cpp
+|   |   |   |   ├── EvidenceManager.cpp
+|   |   |   |   └── InvestigationManager.cpp
+|   |   |   ├── models/
+|   |   |       ├── Case.cpp
+|   |   |       ├── Evidence.cpp
+|   |   |       └── ChargeSheet.cpp
+|   |   ├── subsystem2.h      // public API
+|   |   └── subsystem2.cpp      // Implementation + routes to managers
+|   |
 |   ├── subsystem3/
 |   |   ├── audit/
 |   |   │   ├── include/
