@@ -52,7 +52,7 @@ namespace auth
          * 2. Send password to DB (via Unix socket, local only)
          * 3. PostgreSQL runs crypt() verification
          * 4. Generate random token via token_generator
-         * 5. Create SessionContext with 8-hour hard expiry
+         * 5. Create JusticeFlow::SessionContext with 8-hour hard expiry
          * 6. Insert into session_store
          * 7. Return session to caller
          *
@@ -69,7 +69,7 @@ namespace auth
          */
         JusticeFlow::ResultCode login(const std::string &cnic,
                                       const std::string &password,
-                                      SessionContext &out_session);
+                                      JusticeFlow::SessionContext &out_session);
 
         /**
          * Validates a session token and returns the session context.
@@ -89,7 +89,7 @@ namespace auth
          *         NOT_FOUND if token not in session store
          */
         JusticeFlow::ResultCode validateToken(const std::string &token,
-                                              SessionContext &out_session);
+                                              JusticeFlow::SessionContext &out_session);
 
         /**
          * Validates an officer's rank meets a minimum requirement.
@@ -106,7 +106,7 @@ namespace auth
          * @return OK if officer's rank >= minimum_rank
          *         PERMISSION_DENIED if rank insufficient
          */
-        JusticeFlow::ResultCode validateRank(const SessionContext &session, int minimum_rank);
+        JusticeFlow::ResultCode validateRank(const JusticeFlow::SessionContext &session, int minimum_rank);
 
         /**
          * Checks if an officer's duty is currently active.
@@ -133,7 +133,7 @@ namespace auth
          *         NOT_FOUND if token not in session store
          *         DB_ERROR on database failure
          */
-        JusticeFlow::ResultCode refreshSession(SessionContext &session);
+        JusticeFlow::ResultCode refreshSession(JusticeFlow::SessionContext &session);
 
         /**
          * Logs out an officer and destroys the session.
@@ -145,7 +145,7 @@ namespace auth
          *         NOT_FOUND if token not in session store
          *         DB_ERROR on database failure
          */
-        JusticeFlow::ResultCode logout(const SessionContext &session);
+        JusticeFlow::ResultCode logout(const JusticeFlow::SessionContext &session);
 
         /**
          * Gets the current active session count.

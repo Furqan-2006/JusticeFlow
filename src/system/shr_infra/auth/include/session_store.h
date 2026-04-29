@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <ctime>
 #include "os_layer/threading/include/sync.h"
+#include "common/common.h"
 #include "common/constants.h"
 
 namespace auth {
@@ -13,15 +14,6 @@ namespace auth {
  * 
  * Represents an authenticated officer session. Owned by session_store.
  */
-struct SessionContext {
-    std::string token;              // UUID v4 token for this session
-    int officer_id;                 // Officer's unique ID from DB
-    std::string officer_rank;       // Officer's rank (Constable, Inspector, etc.)
-    long login_timestamp;           // When session started (UTC)
-    long expires_at;                // Hard expiry (8 hours from login)
-    long last_active_at;            // Last request time (for 30-min idle timeout)
-    bool is_duty_active;            // Cached duty status at login time
-};
 
 /**
  * @file session_store.h
@@ -34,7 +26,7 @@ struct SessionContext {
  *   1. Worker calls session_store::validate(token)
  *   2. Read lock acquired, O(1) map lookup
  *   3. Expiry checked (hard + idle)
- *   4. SessionContext returned or SESSION_EXPIRED
+ *   4. JusticeFlow::SessionContext returned or SESSION_EXPIRED
  * 
  * Writes (login/logout/refresh) acquire write lock.
  */
@@ -46,10 +38,10 @@ public:
      * Acquires write lock. Also writes to PostgreSQL sessions table
      * for persistence and audit trail.
      * 
-     * @param session The SessionContext to insert
+     * @param session The JusticeFlow::SessionContext to insert
      * @return OK on success, DB_ERROR on database failure
      */
-    JusticeFlow::ResultCode insert(const SessionContext& session);
+    JusticeFlow::ResultCode insert(const JusticeFlow::SessionContext& session);
     
     /**
      * Validates a token and returns the session context.
@@ -63,7 +55,7 @@ public:
      *         SESSION_EXPIRED if past hard or idle expiry
      *         NOT_FOUND if token not in map
      */
-    JusticeFlow::ResultCode validate(const std::string& token, SessionContext& out_session);
+    JusticeFlow::ResultCode validate(const std::string& token, JusticeFlow::SessionContext& out_session);
     
     /**
      * Refreshes a session by resetting idle timeout.
@@ -101,7 +93,7 @@ public:
     int getActiveCount() const;
     
 private:
-    std::unordered_map<std::string, SessionContext> session_map;
+    std::unordered_map<std::string, JusticeFlow::SessionContext> session_map;
     mutable RWLock map_lock;
     
     // Constants
@@ -114,7 +106,7 @@ private:
      * 
      * @return true if hard expiry OR idle timeout reached
      */
-    bool isExpired(const SessionContext& session) const;
+    bool isExpired(const JusticeFlow::SessionContext& session) const;
 };
 
 } // namespace auth

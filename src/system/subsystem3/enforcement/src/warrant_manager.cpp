@@ -24,8 +24,8 @@
  *   18 EXTRACT(EPOCH FROM updated_at)
  */
 
-#include "enforcement/include/warrant_manager.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../include/warrant_manager.h"
+#include "../../../shr_infra/auth/include/auth_module.h"
 #include "common/logger.h"
 
 #include <cstring>
@@ -277,10 +277,8 @@ namespace enforcement
                                         ResultCode &out_code)
     {
         // 1. Rank check — INSPECTOR minimum
-        bool rank_ok = false;
-        ResultCode rank_rc = AuthManager::validateRank(
-            session.officerId, OfficerRank::INSPECTOR, rank_ok);
-        if (rank_rc != ResultCode::OK || !rank_ok)
+        ResultCode rank_rc = auth::AuthManager::getInstance().validateRank(session, static_cast<int>(OfficerRank::INSPECTOR));
+        if (rank_rc != ResultCode::OK)
         {
             out_code = ResultCode::RANK_INSUFFICIENT;
             Logger::debug("warrant_manager: Rank insufficient for warrant request");
@@ -319,7 +317,7 @@ namespace enforcement
                       (long long)std::time(nullptr), session.officerId);
 
         // 4. Set session vars for audit trigger
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;
@@ -374,9 +372,8 @@ namespace enforcement
                                         ResultCode &out_code)
     {
         // 1. Rank check — INSPECTOR minimum
-        bool rank_ok = false;
-        AuthManager::validateRank(session.officerId, OfficerRank::INSPECTOR, rank_ok);
-        if (!rank_ok)
+        ResultCode rank_ok = auth::AuthManager::getInstance().validateRank(session, static_cast<int>(OfficerRank::INSPECTOR));
+        if (rank_ok != JusticeFlow::ResultCode::OK)
         {
             out_code = ResultCode::RANK_INSUFFICIENT;
             return false;
@@ -387,7 +384,7 @@ namespace enforcement
             return false;
 
         // 3. Set session vars
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;
@@ -435,9 +432,8 @@ namespace enforcement
         }
 
         // 1. Rank check — INSPECTOR minimum (SHO level)
-        bool rank_ok = false;
-        AuthManager::validateRank(session.officerId, OfficerRank::INSPECTOR, rank_ok);
-        if (!rank_ok)
+        ResultCode rank_rc = auth::AuthManager::getInstance().validateRank(session, static_cast<int>(OfficerRank::INSPECTOR));
+        if (rank_rc != JusticeFlow::ResultCode::OK)
         {
             out_code = ResultCode::RANK_INSUFFICIENT;
             return false;
@@ -448,7 +444,7 @@ namespace enforcement
             return false;
 
         // 3. Set session vars
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;

@@ -18,9 +18,9 @@
 // Trigger 2 (Forensic_Lab_Requests UPDATE to REPORT_DELIVERED) → RETURNED_FROM_LAB
 // ============================================================================
 
-#include "forensic/include/forensic_manager.h"
-#include "forensic/include/forensic_repository.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../include/forensic_manager.h"
+#include "../include/forensic_repository.h"
+#include "../../../shr_infra/auth/include/auth_module.h"
 #include "os_layer/ipc/include/ipc_manager.h"
 #include "common/logger.h"
 #include <cstring>
@@ -106,13 +106,13 @@ namespace forensic
                                    PGconn *&out_conn,
                                    SessionContext &out_ctx)
     {
-        out_conn = ipc::IpcManager::getInstance().getConnection();
-        if (!out_conn)
+        out_conn = ipc::IpcManager::getInstance().connectDatabase();
+        if (out_conn)
         {
             Logger::error("forensic_manager: No DB connection available");
             return ResultCode::DB_ERROR;
         }
-        return AuthManager::validateToken(token, out_ctx);
+        return AuthManager::getInstance.validateToken(token, out_ctx);
     }
 
     // ============================================================================

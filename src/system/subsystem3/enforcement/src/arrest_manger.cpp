@@ -27,8 +27,8 @@
  *   14 EXTRACT(EPOCH FROM updated_at)
  */
 
-#include "enforcement/include/arrest_manager.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../include/arrest_manager.h"
+#include "../../../shr_infra/auth/include/auth_module.h"
 #include "common/logger.h"
 
 #include <cstring>
@@ -237,7 +237,7 @@ namespace enforcement
     // -----------------------------------------------------------------------
 
     bool ArrestManager::recordArrest(PGconn *conn,
-                                     const SessionContext &session,
+                                     const JusticeFlow::SessionContext &session,
                                      int case_id,
                                      const char *accused_cnic,
                                      const char *arrest_location,
@@ -254,7 +254,7 @@ namespace enforcement
         }
 
         // 2. Set session vars for audit trigger
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;
@@ -335,7 +335,7 @@ namespace enforcement
     // -----------------------------------------------------------------------
 
     bool ArrestManager::updateCustodyStatus(PGconn *conn,
-                                            const SessionContext &session,
+                                            const JusticeFlow::SessionContext &session,
                                             int arrest_id,
                                             CustodyStatus new_status,
                                             const char *reason,
@@ -357,7 +357,7 @@ namespace enforcement
             return false;
 
         // Set session vars
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;
@@ -391,7 +391,7 @@ namespace enforcement
     // -----------------------------------------------------------------------
 
     bool ArrestManager::markAsDisputed(PGconn *conn,
-                                       const SessionContext &session,
+                                       const JusticeFlow::SessionContext &session,
                                        int arrest_id,
                                        const char *dispute_reason,
                                        ResultCode &out_code)
@@ -403,7 +403,7 @@ namespace enforcement
             return false;
         }
 
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;

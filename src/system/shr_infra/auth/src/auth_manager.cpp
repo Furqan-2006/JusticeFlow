@@ -38,7 +38,7 @@ namespace auth
 
     JusticeFlow::ResultCode AuthManager::login(const std::string &cnic,
                                                const std::string &password,
-                                               SessionContext &out_session)
+                                               JusticeFlow::SessionContext &out_session)
     {
         // Pin password buffer in memory and zero after use
         mlock_guard pwd_guard(const_cast<char *>(password.c_str()), password.length());
@@ -84,9 +84,9 @@ namespace auth
 
         // Create session context
         long now = time(nullptr);
-        out_session.token = token;
-        out_session.officer_id = officer_id;
-        out_session.officer_rank = rank;
+        out_session.sessionToken = token;
+        out_session.officerId = officer_id;
+        out_session.rank = rank;
         out_session.login_timestamp = now;
         out_session.expires_at = now + (8 * 3600); // 8 hours from now
         out_session.last_active_at = now;
@@ -110,7 +110,7 @@ namespace auth
     }
 
     JusticeFlow::ResultCode AuthManager::validateToken(const std::string &token,
-                                                       SessionContext &out_session)
+                                                       JusticeFlow::SessionContext &out_session)
     {
         if (token.empty())
         {
@@ -120,17 +120,17 @@ namespace auth
         return session_store->validate(token, out_session);
     }
 
-    JusticeFlow::ResultCode AuthManager::validateRank(const SessionContext &session, int minimum_rank)
+    JusticeFlow::ResultCode AuthManager::validateRank(const JusticeFlow::SessionContext &session, int minimum_rank)
     {
         // Map rank string to numeric value
         int rank_value = 0;
-        if (session.officer_rank == "Constable")
+        if (session.rank == JusticeFlow::OfficerRank::CONSTABLE)
             rank_value = 0;
-        else if (session.officer_rank == "Inspector")
+        else if (session.rank == JusticeFlow::OfficerRank::INSPECTOR)
             rank_value = 1;
-        else if (session.officer_rank == "Sub-Inspector")
+        else if (session.rank == JusticeFlow::OfficerRank::SI)
             rank_value = 2;
-        else if (session.officer_rank == "DSP")
+        else if (session.rank == JusticeFlow::OfficerRank::DSP)
             rank_value = 3;
         else
         {
@@ -158,7 +158,7 @@ namespace auth
         return duty_cache->check(officer_id, out_active);
     }
 
-    JusticeFlow::ResultCode AuthManager::refreshSession(SessionContext &session)
+    JusticeFlow::ResultCode AuthManager::refreshSession(JusticeFlow::SessionContext &session)
     {
         JusticeFlow::ResultCode result = session_store->refresh(session.token);
         if (result == JusticeFlow::ResultCode::OK)
@@ -169,7 +169,7 @@ namespace auth
         return result;
     }
 
-    JusticeFlow::ResultCode AuthManager::logout(const SessionContext &session)
+    JusticeFlow::ResultCode AuthManager::logout(const JusticeFlow::SessionContext &session)
     {
         JusticeFlow::ResultCode result = session_store->remove(session.token);
 

@@ -27,17 +27,39 @@
  *   18 EXTRACT(EPOCH FROM updated_at)
  */
 
-#include "enforcement/include/bail_manager.h"
-#include "legal/include/compliance.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../include/bail_manager.h"
+#include "../../../shr_infra/auth/include/auth_module.h"
 #include "common/logger.h"
 
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <string>
 
 using namespace JusticeFlow;
+
+namespace legal
+{
+    struct ComplianceResult
+    {
+        JusticeFlow::ResultCode code{JusticeFlow::ResultCode::OK};
+        std::string reason;
+    };
+
+    class Compliance
+    {
+    public:
+        static ComplianceResult validateBailAmount(JusticeFlow::BailType, uint64_t bail_amount_paise)
+        {
+            if (bail_amount_paise == 0)
+            {
+                return {JusticeFlow::ResultCode::INVALID_INPUT, "Bail amount must be greater than zero"};
+            }
+            return {JusticeFlow::ResultCode::OK, ""};
+        }
+    };
+}
 
 namespace enforcement
 {
@@ -241,9 +263,8 @@ namespace enforcement
                                  ResultCode &out_code)
     {
         // 1. Rank check — INSPECTOR minimum
-        bool rank_ok = false;
-        AuthManager::validateRank(session.officerId, OfficerRank::INSPECTOR, rank_ok);
-        if (!rank_ok)
+        JusticeFlow::ResultCode rank_ok = auth::AuthManager::getInstance().validateRank(session, static_cast<int>(JusticeFlow::OfficerRank::INSPECTOR));
+        if (rank_ok != JusticeFlow::ResultCode::OK)
         {
             out_code = ResultCode::RANK_INSUFFICIENT;
             Logger::debug("bail_manager: Rank insufficient for bail");
@@ -284,7 +305,7 @@ namespace enforcement
         }
 
         // 5. Set session vars for audit trigger
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;
@@ -366,9 +387,8 @@ namespace enforcement
         }
 
         // 1. Rank check — INSPECTOR minimum
-        bool rank_ok = false;
-        AuthManager::validateRank(session.officerId, OfficerRank::INSPECTOR, rank_ok);
-        if (!rank_ok)
+        ResultCode rank_ok = auth::AuthManager::getInstance().validateRank(session, static_cast<int>(OfficerRank::INSPECTOR));
+        if (rank_ok != JusticeFlow::ResultCode::OK)
         {
             out_code = ResultCode::RANK_INSUFFICIENT;
             return false;
@@ -380,7 +400,7 @@ namespace enforcement
             return false;
 
         // 3. Set session vars
-        if (!_setSessionVars(conn, session.officerId, session.beltNumber))
+        if (!_setSessionVars(conn, session.officerId, session.belt_number.c_str()))
         {
             out_code = ResultCode::DB_ERROR;
             return false;

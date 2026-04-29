@@ -29,7 +29,7 @@
  * _mapRow() is coupled to this order. Any schema change must update both.
  */
 
-#include "audit/include/audit_query.h"
+#include "../include/audit_query.h"
 #include "common/logger.h"
 
 #include <cstring>
