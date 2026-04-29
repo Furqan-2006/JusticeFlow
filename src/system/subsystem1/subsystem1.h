@@ -42,6 +42,7 @@
 #include "include/case_manager.h"
 #include "include/case_strategy.h"
 #include "include/officer_manager.h"
+#include "include/report_factory.h"
 
 namespace subsystem1
 {
@@ -590,7 +591,7 @@ namespace subsystem1
             PGconn *conn,
             const JusticeFlow::SessionContext &session,
             int officer_id,
-            ReportType type,
+            JusticeFlow::ReportType type,
             std::string &out_report_text);
     };
 
