@@ -39,9 +39,9 @@
 #include "common/common.h"
 
 // --- Subsystem 1 internal managers (facade targets) ---
-#include "case_mgmt/include/case_manager.h"
-#include "duty/include/duty_manager.h"
-#include "personnel/include/personnel_manager.h"
+#include "include/case_manager.h"
+#include "include/case_strategy.h"
+#include "include/officer_manager.h"
 
 namespace subsystem1
 {
