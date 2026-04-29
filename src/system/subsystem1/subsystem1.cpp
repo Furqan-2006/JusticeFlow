@@ -610,7 +610,7 @@ namespace subsystem1
         PGconn *conn,
         const JusticeFlow::SessionContext &session,
         int officer_id,
-        ReportType type,
+        JusticeFlow::ReportType type,
         std::string &out_report_text)
     {
         /*

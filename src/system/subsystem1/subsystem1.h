@@ -42,7 +42,17 @@
 #include "include/case_manager.h"
 #include "include/case_strategy.h"
 #include "include/officer_manager.h"
-#include "include/report_factory.h"
+
+// ---------------------------------------------------------------------------
+// Namespace aliases
+// All internal S1 managers live in the JusticeFlow namespace.
+// These aliases allow subsystem1.cpp to address them through the logical
+// sub-domain names (case_mgmt / duty / personnel) without introducing
+// additional nesting in the actual implementation headers.
+// ---------------------------------------------------------------------------
+namespace case_mgmt = JusticeFlow;
+namespace duty = JusticeFlow;
+namespace personnel = JusticeFlow;
 
 namespace subsystem1
 {
