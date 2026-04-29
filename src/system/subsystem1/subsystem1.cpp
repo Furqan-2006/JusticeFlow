@@ -19,7 +19,7 @@
  *                         status updates and promotions.
  */
 
-#include "subsystem1/subsystem1.h"
+#include "subsystem1.h"
 
 namespace subsystem1
 {
