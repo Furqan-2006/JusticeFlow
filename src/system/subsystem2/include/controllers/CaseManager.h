@@ -1,5 +1,4 @@
-#ifndef CASE_MANAGER_H
-#define CASE_MANAGER_H
+#pragma once
 
 #include "../models/Case.h"
 #include "../s2_types.h"
@@ -21,5 +20,3 @@ public:
 };
 
 } // namespace subsystem2
-
-#endif // CASE_MANAGER_H

@@ -1,5 +1,4 @@
-#ifndef INVESTIGATION_MANAGER_H
-#define INVESTIGATION_MANAGER_H
+#pragma once
 
 #include "../models/ChargeSheet.h"
 #include "../s2_types.h"
@@ -37,5 +36,3 @@ public:
 };
 
 } // namespace subsystem2
-
-#endif // INVESTIGATION_MANAGER_H
