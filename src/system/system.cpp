@@ -1,30 +1,51 @@
 /**
  * @file system.cpp
- * @brief SystemManager implementation: concrete adapters + facade routing.
+ * @brief SystemManager implementation: concrete adapters + sub-facade routing.
  *
+ * ============================================================================
  * File layout
- * ──────────────────────────────────────────────────────────────────────────
- * Section 1  Default concrete Adapter implementations
- *              DefaultAuthAdapter       — delegates to auth::AuthManager
- *              DefaultSubsystem1Adapter — delegates to subsystem1::Subsystem1
- *              DefaultSubsystem2Adapter — delegates to subsystem2::Subsystem2
- *              DefaultSubsystem3Adapter — delegates to subsystem3::Subsystem3
+ * ============================================================================
  *
- * Section 2  SystemManager — Singleton + Lifecycle (Manager pattern)
+ *  Section 1  Concrete Adapter Helpers
+ *               adapt_s1_bool()  — converts S1's bool+out_code into SystemResult
+ *               adapt_s1_rc()    — converts S1's ResultCode+out-param into SystemResult
+ *               adapt_s3_bool()  — converts S3's bool+out_code into SystemResult
+ *               adapt_s3_rc()    — converts S3's ResultCode+out-param into SystemResult
  *
- * Section 3  SystemManager — Auth facade
+ *  Section 2  Default concrete adapter implementations
+ *               DefaultAuthAdapter
+ *               DefaultSubsystem1Adapter
+ *               DefaultSubsystem2Adapter
+ *               DefaultSubsystem3Adapter
  *
- * Section 4  SystemManager — Subsystem 1 facade (Case, Duty, Personnel)
+ *  Section 3  SystemManager — Singleton + Lifecycle
  *
- * Section 5  SystemManager — Subsystem 2 facade (Investigation UCs)
+ *  Section 4  AuthFacade method bodies
  *
- * Section 6  SystemManager — Subsystem 3 facade (Audit, Enforcement, Forensic)
- * ──────────────────────────────────────────────────────────────────────────
+ *  Section 5  CaseFacade method bodies
  *
- * Every public method in Sections 3-6 follows the same three-step pattern:
- *   1. guardInitialized() — abort with NOT_INITIALIZED if init() was skipped.
- *   2. Delegate to the injected adapter (virtual dispatch).
- *   3. Return the result unchanged — no business logic lives here.
+ *  Section 6  InvestigationFacade method bodies
+ *
+ *  Section 7  PersonnelFacade method bodies
+ *
+ *  Section 8  DutyFacade method bodies
+ *
+ *  Section 9  EnforcementFacade method bodies
+ *
+ *  Section 10 AuditFacade method bodies
+ *
+ *  Section 11 ForensicFacade method bodies
+ *
+ * ============================================================================
+ * Adapter translation pattern
+ * ============================================================================
+ *
+ *  S1 and S3 expose:  bool fn(..., T &out, ResultCode &out_code)
+ *  We want:           SystemResult<T> fn(...)
+ *
+ *  The adapt_*() helpers below make this conversion explicit and reusable,
+ *  so that the concrete adapters stay as thin pass-throughs with no ad-hoc
+ *  result construction scattered across 50+ methods.
  */
 
 #include "system.h"
@@ -33,2043 +54,1643 @@
 namespace system_layer
 {
 
-    // =============================================================================
-    // Section 1 — Default Concrete Adapters (Adapter Pattern)
-    // =============================================================================
-    // Each concrete adapter is an internal implementation detail — NOT exported.
-    // They are only ever created by SystemManager::init() when no injection has
-    // been provided for that slot.
-    // =============================================================================
+// =============================================================================
+// Section 1 — Adapter Helper: result translation utilities
+// =============================================================================
 
-    // -----------------------------------------------------------------------------
-    // DefaultAuthAdapter
-    // -----------------------------------------------------------------------------
-
-    class DefaultAuthAdapter final : public IAuthAdapter
+namespace detail
+{
+    /**
+     * Convert the S1/S3 bool+out_code+out_value pattern into SystemResult<T>.
+     * Usage:
+     *   return adapt_bool<int>(
+     *       [&](int &val, JusticeFlow::ResultCode &rc) {
+     *           return subsystem1::Subsystem1::registerCase(..., val, rc);
+     *       });
+     */
+    template<typename T, typename Fn>
+    SystemResult<T> adapt_bool(Fn &&fn)
     {
-    public:
-        JusticeFlow::ResultCode login(
-            const char *cnic,
-            const char *password,
-            std::string &out_token) override
-        {
-            return auth::AuthManager::getInstance().login(cnic, password, out_token);
-        }
-
-        JusticeFlow::ResultCode validateToken(
-            const char *token,
-            JusticeFlow::SessionContext &out_session) override
-        {
-            return auth::AuthManager::getInstance().validateToken(token, out_session);
-        }
-
-        JusticeFlow::ResultCode validateRank(
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::OfficerRank required_rank) override
-        {
-            return auth::AuthManager::getInstance().validateRank(session, required_rank);
-        }
-
-        bool isDutyActive(int officer_id) override
-        {
-            return auth::AuthManager::getInstance().isDutyActive(officer_id);
-        }
-
-        JusticeFlow::ResultCode refreshSession(const char *token) override
-        {
-            return auth::AuthManager::getInstance().refreshSession(token);
-        }
-
-        JusticeFlow::ResultCode logout(const char *token) override
-        {
-            return auth::AuthManager::getInstance().logout(token);
-        }
-    };
-
-    // -----------------------------------------------------------------------------
-    // DefaultSubsystem1Adapter
-    // Bridges SystemManager's virtual-dispatch surface to S1's all-static interface.
-    // -----------------------------------------------------------------------------
-
-    class DefaultSubsystem1Adapter final : public ISubsystem1Adapter
-    {
-    public:
-        // ── Case CRUD ─────────────────────────────────────────────────────────────
-
-        bool registerCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::CaseType case_type,
-            time_t incident_date,
-            const char *incident_address,
-            const char *description,
-            double lat, double lon,
-            int station_id,
-            const char *complainant_cnic,
-            int &out_case_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::registerCase(
-                conn, session, case_type, incident_date,
-                incident_address, description, lat, lon,
-                station_id, complainant_cnic, out_case_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getCaseById(
-            PGconn *conn, int case_id,
-            JusticeFlow::Case &out) override
-        {
-            return subsystem1::Subsystem1::getCaseById(conn, case_id, out);
-        }
-
-        JusticeFlow::ResultCode getCasesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Case> &out) override
-        {
-            return subsystem1::Subsystem1::getCasesByStation(conn, station_id, out);
-        }
-
-        JusticeFlow::ResultCode getCasesByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::CaseStatus status,
-            std::vector<JusticeFlow::Case> &out) override
-        {
-            return subsystem1::Subsystem1::getCasesByStatus(conn, station_id, status, out);
-        }
-
-        // ── Status Transitions ────────────────────────────────────────────────────
-
-        bool updateCaseStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            JusticeFlow::CaseStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::updateCaseStatus(
-                conn, session, case_id, new_status, reason, out_code);
-        }
-
-        bool closeCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *closure_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::closeCase(
-                conn, session, case_id, closure_reason, out_code);
-        }
-
-        bool reopenCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *reopen_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::reopenCase(
-                conn, session, case_id, reopen_reason, out_code);
-        }
-
-        bool transferCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            int to_station_id,
-            const char *transfer_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::transferCase(
-                conn, session, case_id, to_station_id, transfer_reason, out_code);
-        }
-
-        JusticeFlow::ResultCode getCaseStatusLog(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseStatusLog> &out) override
-        {
-            return subsystem1::Subsystem1::getCaseStatusLog(conn, case_id, out);
-        }
-
-        // ── Officer Assignment ────────────────────────────────────────────────────
-
-        bool assignOfficerToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::CaseOfficerRole role,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::assignOfficerToCase(
-                conn, session, case_id, officer_id, role, out_code);
-        }
-
-        bool relieveOfficerFromCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::relieveOfficerFromCase(
-                conn, session, case_id, officer_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getAssignedOfficers(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseOfficer> &out) override
-        {
-            return subsystem1::Subsystem1::getAssignedOfficers(conn, case_id, out);
-        }
-
-        // ── Complainants ──────────────────────────────────────────────────────────
-
-        bool addComplainant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::RelationshipToVictim relation,
-            bool notify_on_update,
-            int &out_complainant_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::addComplainant(
-                conn, session, case_id, person_cnic,
-                relation, notify_on_update, out_complainant_id, out_code);
-        }
-
-        bool updateComplainantStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int complainant_id,
-            JusticeFlow::ComplainantStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::updateComplainantStatus(
-                conn, session, complainant_id, new_status, reason, out_code);
-        }
-
-        JusticeFlow::ResultCode getComplainantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Complainant> &out) override
-        {
-            return subsystem1::Subsystem1::getComplainantsByCase(conn, case_id, out);
-        }
-
-        // ── Victims ───────────────────────────────────────────────────────────────
-
-        bool addVictim(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *injury_type,
-            JusticeFlow::InjurySeverity injury_severity,
-            JusticeFlow::VulnerabilityCategory vulnerability,
-            const char *medical_report_ref,
-            int &out_victim_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::addVictim(
-                conn, session, case_id, person_cnic,
-                injury_type, injury_severity, vulnerability,
-                medical_report_ref, out_victim_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getVictimsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Victim> &out) override
-        {
-            return subsystem1::Subsystem1::getVictimsByCase(conn, case_id, out);
-        }
-
-        // ── Witnesses ─────────────────────────────────────────────────────────────
-
-        bool addWitness(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *statement_text,
-            const char *statement_file_path,
-            JusticeFlow::WitnessProtection protection_status,
-            bool conceal_identity,
-            int &out_witness_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::addWitness(
-                conn, session, case_id, person_cnic,
-                statement_text, statement_file_path,
-                protection_status, conceal_identity,
-                out_witness_id, out_code);
-        }
-
-        bool updateWitnessProtection(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int witness_id,
-            JusticeFlow::WitnessProtection new_status,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::updateWitnessProtection(
-                conn, session, witness_id, new_status, out_code);
-        }
-
-        JusticeFlow::ResultCode getWitnessesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Witness> &out) override
-        {
-            return subsystem1::Subsystem1::getWitnessesByCase(conn, case_id, out);
-        }
-
-        // ── Accused ───────────────────────────────────────────────────────────────
-
-        bool addAccused(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::InvolvementType involvement,
-            int &out_accused_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::addAccused(
-                conn, session, case_id, person_cnic,
-                involvement, out_accused_id, out_code);
-        }
-
-        bool linkAccusedAssociation(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int accused_id, int associated_accused_id,
-            JusticeFlow::AssociationType association_type,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::linkAccusedAssociation(
-                conn, session, accused_id, associated_accused_id,
-                association_type, out_code);
-        }
-
-        JusticeFlow::ResultCode getAccusedByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Accused> &out) override
-        {
-            return subsystem1::Subsystem1::getAccusedByCase(conn, case_id, out);
-        }
-
-        // ── Vehicles ──────────────────────────────────────────────────────────────
-
-        bool linkVehicleToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int vehicle_id,
-            JusticeFlow::VehicleRole role,
-            const char *condition_notes,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::linkVehicleToCase(
-                conn, session, case_id, vehicle_id, role, condition_notes, out_code);
-        }
-
-        JusticeFlow::ResultCode getVehiclesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::VehicleCase> &out) override
-        {
-            return subsystem1::Subsystem1::getVehiclesByCase(conn, case_id, out);
-        }
-
-        // ── Duty Scheduling ───────────────────────────────────────────────────────
-
-        bool scheduleDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id, int station_id, int patrol_route_id,
-            JusticeFlow::ShiftType shift_type,
-            const char *duty_date,
-            time_t scheduled_start, time_t scheduled_end,
-            int &out_duty_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::scheduleDuty(
-                conn, session, officer_id, station_id, patrol_route_id,
-                shift_type, duty_date,
-                scheduled_start, scheduled_end,
-                out_duty_id, out_code);
-        }
-
-        bool markDutyStart(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::markDutyStart(conn, session, duty_id, out_code);
-        }
-
-        bool markDutyEnd(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::markDutyEnd(conn, session, duty_id, out_code);
-        }
-
-        bool updateDutyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::DutyStatus new_status,
-            const char *absence_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::updateDutyStatus(
-                conn, session, duty_id, new_status, absence_reason, out_code);
-        }
-
-        bool cancelDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::cancelDuty(conn, session, duty_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getDutyRoster(
-            PGconn *conn, int station_id,
-            const char *duty_date,
-            std::vector<JusticeFlow::DutyRoster> &out) override
-        {
-            return subsystem1::Subsystem1::getDutyRoster(conn, station_id, duty_date, out);
-        }
-
-        JusticeFlow::ResultCode getActiveDuties(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::DutyRoster> &out) override
-        {
-            return subsystem1::Subsystem1::getActiveDuties(conn, station_id, out);
-        }
-
-        JusticeFlow::ResultCode getOfficerDutyHistory(
-            PGconn *conn, int officer_id,
-            time_t from, time_t to,
-            std::vector<JusticeFlow::DutyRoster> &out) override
-        {
-            return subsystem1::Subsystem1::getOfficerDutyHistory(
-                conn, officer_id, from, to, out);
-        }
-
-        // ── Patrol Routes ─────────────────────────────────────────────────────────
-
-        bool createPatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int station_id,
-            const char *beat_code,
-            const char *route_name,
-            const char *area_description,
-            int &out_route_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::createPatrolRoute(
-                conn, session, station_id, beat_code, route_name,
-                area_description, out_route_id, out_code);
-        }
-
-        bool deactivatePatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int route_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::deactivatePatrolRoute(
-                conn, session, route_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getPatrolRoutesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::PatrolRoute> &out) override
-        {
-            return subsystem1::Subsystem1::getPatrolRoutesByStation(conn, station_id, out);
-        }
-
-        // ── Personnel ─────────────────────────────────────────────────────────────
-
-        JusticeFlow::ResultCode getOfficerById(
-            PGconn *conn, int officer_id,
-            JusticeFlow::Officer &out) override
-        {
-            return subsystem1::Subsystem1::getOfficerById(conn, officer_id, out);
-        }
-
-        JusticeFlow::ResultCode getOfficerByCnic(
-            PGconn *conn, const char *cnic,
-            JusticeFlow::Officer &out) override
-        {
-            return subsystem1::Subsystem1::getOfficerByCnic(conn, cnic, out);
-        }
-
-        JusticeFlow::ResultCode getOfficersByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Officer> &out) override
-        {
-            return subsystem1::Subsystem1::getOfficersByStation(conn, station_id, out);
-        }
-
-        JusticeFlow::ResultCode getOfficersByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::OfficerStatus status,
-            std::vector<JusticeFlow::Officer> &out) override
-        {
-            return subsystem1::Subsystem1::getOfficersByStatus(conn, station_id, status, out);
-        }
-
-        bool updateOfficerStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerStatus new_status,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::updateOfficerStatus(
-                conn, session, officer_id, new_status, out_code);
-        }
-
-        bool promoteOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerRank new_rank,
-            const char *new_belt_number,
-            const char *promotion_type,
-            const char *effective_date,
-            const char *order_date,
-            int &out_history_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::promoteOfficer(
-                conn, session, officer_id, new_rank,
-                new_belt_number, promotion_type,
-                effective_date, order_date,
-                out_history_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getOfficerRankHistory(
-            PGconn *conn, int officer_id,
-            std::vector<JusticeFlow::OfficerRankHistory> &out) override
-        {
-            return subsystem1::Subsystem1::getOfficerRankHistory(conn, officer_id, out);
-        }
-
-        bool deployOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id, int to_station_id,
-            const char *deployment_reason,
-            const char *order_number,
-            const char *deployed_from,
-            const char *deployed_until,
-            int &out_deployment_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::deployOfficer(
-                conn, session, officer_id, to_station_id,
-                deployment_reason, order_number,
-                deployed_from, deployed_until,
-                out_deployment_id, out_code);
-        }
-
-        bool endDeployment(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int deployment_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem1::Subsystem1::endDeployment(
-                conn, session, deployment_id, out_code);
-        }
-
-        JusticeFlow::ResultCode getOfficerDeployments(
-            PGconn *conn, int officer_id,
-            bool active_only,
-            std::vector<JusticeFlow::OfficerDeployment> &out) override
-        {
-            return subsystem1::Subsystem1::getOfficerDeployments(
-                conn, officer_id, active_only, out);
-        }
-
-        JusticeFlow::ResultCode generateOfficerReport(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            subsystem1::ReportType type,
-            std::string &out_report_text) override
-        {
-            return subsystem1::Subsystem1::generateOfficerReport(
-                conn, session, officer_id, type, out_report_text);
-        }
-    };
-
-    // -----------------------------------------------------------------------------
-    // DefaultSubsystem2Adapter
-    // Bridges SystemManager to the Subsystem2 singleton.
-    // Preserves S2's heap-allocated entity return contract.
-    // -----------------------------------------------------------------------------
-
-    class DefaultSubsystem2Adapter final : public ISubsystem2Adapter
-    {
-    public:
-        JusticeFlow::ResultCode registerFIR(
-            const subsystem2::FIRRegistrationRequest &request,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Case *&out_case) override
-        {
-            return subsystem2::Subsystem2::getInstance().registerFIR(
-                request, session, out_case);
-        }
-
-        JusticeFlow::ResultCode logAndSecureEvidence(
-            int64_t case_id,
-            JusticeFlow::EvidenceType type,
-            const std::string &description,
-            const std::string &file_path,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Evidence *&out_evidence) override
-        {
-            return subsystem2::Subsystem2::getInstance().logAndSecureEvidence(
-                case_id, type, description, file_path, session, out_evidence);
-        }
-
-        JusticeFlow::ResultCode draftChargeSheet(
-            int64_t case_id,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::ChargeSheet *&out_sheet) override
-        {
-            return subsystem2::Subsystem2::getInstance().draftChargeSheet(
-                case_id, session, out_sheet);
-        }
-
-        JusticeFlow::ResultCode submitChargeSheet(
-            subsystem2::ChargeSheet *sheet,
-            const JusticeFlow::SessionContext &session) override
-        {
-            return subsystem2::Subsystem2::getInstance().submitChargeSheet(sheet, session);
-        }
-
-        JusticeFlow::ResultCode fetchCase(
-            int64_t case_id,
-            subsystem2::Case *&out_case) override
-        {
-            return subsystem2::Subsystem2::getInstance().fetchCase(case_id, out_case);
-        }
-    };
-
-    // -----------------------------------------------------------------------------
-    // DefaultSubsystem3Adapter
-    // Bridges SystemManager to the mixed-convention Subsystem3 static facade.
-    // Audit lifecycle is managed externally by SystemManager::init/shutdown.
-    // -----------------------------------------------------------------------------
-
-    class DefaultSubsystem3Adapter final : public ISubsystem3Adapter
-    {
-    public:
-        // ── Audit ─────────────────────────────────────────────────────────────────
-
-        JusticeFlow::ResultCode getAuditChangeHistory(
-            int case_id,
-            std::vector<audit::AuditRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getAuditChangeHistory(case_id, out);
-        }
-
-        JusticeFlow::ResultCode getAuditOfficerActions(
-            int officer_id,
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getAuditOfficerActions(
-                officer_id, from, to, out);
-        }
-
-        JusticeFlow::ResultCode getAuditTableChanges(
-            const char *table_name,
-            int record_id,
-            std::vector<audit::AuditRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getAuditTableChanges(
-                table_name, record_id, out);
-        }
-
-        JusticeFlow::ResultCode auditQueryByTimeWindow(
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out) override
-        {
-            return subsystem3::Subsystem3::auditQueryByTimeWindow(from, to, out);
-        }
-
-        JusticeFlow::ResultCode detectSuspiciousActivity(
-            int station_id,
-            std::vector<audit::AuditRecord> &out) override
-        {
-            return subsystem3::Subsystem3::detectSuspiciousActivity(station_id, out);
-        }
-
-        // ── Warrants ──────────────────────────────────────────────────────────────
-
-        bool requestWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            JusticeFlow::WarrantType warrant_type,
-            const char *magistrate_name,
-            const char *issuing_court,
-            const char *valid_until,
-            const char *target_address,
-            int &out_warrant_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::requestWarrant(
-                conn, session, case_id, accused_cnic, warrant_type,
-                magistrate_name, issuing_court, valid_until, target_address,
-                out_warrant_id, out_code);
-        }
-
-        bool executeWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::executeWarrant(
-                conn, session, warrant_id, out_code);
-        }
-
-        bool cancelWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            const char *cancellation_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::cancelWarrant(
-                conn, session, warrant_id, cancellation_reason, out_code);
-        }
-
-        JusticeFlow::ResultCode getWarrantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::WarrantRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getWarrantsByCase(conn, case_id, out);
-        }
-
-        JusticeFlow::ResultCode getActiveWarrants(
-            PGconn *conn, int station_id,
-            std::vector<enforcement::WarrantRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getActiveWarrants(conn, station_id, out);
-        }
-
-        // ── Arrests ───────────────────────────────────────────────────────────────
-
-        bool recordArrest(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            const char *arrest_location,
-            int warrant_id,
-            int &out_arrest_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::recordArrest(
-                conn, session, case_id, accused_cnic,
-                arrest_location, warrant_id, out_arrest_id, out_code);
-        }
-
-        bool updateCustodyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::CustodyStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::updateCustodyStatus(
-                conn, session, arrest_id, new_status, reason, out_code);
-        }
-
-        bool markArrestAsDisputed(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            const char *dispute_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::markArrestAsDisputed(
-                conn, session, arrest_id, dispute_reason, out_code);
-        }
-
-        JusticeFlow::ResultCode getArrestsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::ArrestRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getArrestsByCase(conn, case_id, out);
-        }
-
-        // ── Bail ──────────────────────────────────────────────────────────────────
-
-        bool recordBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::BailType bail_type,
-            uint64_t bail_amount_paise,
-            const char *court_name,
-            const char *magistrate_name,
-            const char *valid_until,
-            const char *surety_name,
-            const char *surety_cnic,
-            const char *surety_contact,
-            int &out_bail_id,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::recordBail(
-                conn, session, arrest_id, bail_type, bail_amount_paise,
-                court_name, magistrate_name, valid_until,
-                surety_name, surety_cnic, surety_contact,
-                out_bail_id, out_code);
-        }
-
-        bool revokeBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int bail_id,
-            const char *revocation_reason,
-            JusticeFlow::ResultCode &out_code) override
-        {
-            return subsystem3::Subsystem3::revokeBail(
-                conn, session, bail_id, revocation_reason, out_code);
-        }
-
-        JusticeFlow::ResultCode getBailByArrest(
-            PGconn *conn, int arrest_id,
-            enforcement::BailRecord &out) override
-        {
-            return subsystem3::Subsystem3::getBailByArrest(conn, arrest_id, out);
-        }
-
-        // ── Forensic & Lab ────────────────────────────────────────────────────────
-
-        JusticeFlow::ResultCode createForensicRequest(
-            const char *token,
-            int case_id,
-            const char *examination_purpose,
-            const char *purpose_description,
-            const char *lab_name,
-            const char *examiner_name,
-            int &out_request_id) override
-        {
-            return subsystem3::Subsystem3::createForensicRequest(
-                token, case_id, examination_purpose, purpose_description,
-                lab_name, examiner_name, out_request_id);
-        }
-
-        JusticeFlow::ResultCode linkEvidence(
-            const char *token,
-            int request_id,
-            int evidence_id,
-            const char *notes) override
-        {
-            return subsystem3::Subsystem3::linkEvidence(
-                token, request_id, evidence_id, notes);
-        }
-
-        JusticeFlow::ResultCode recordLabReceipt(
-            const char *token,
-            int request_id,
-            const char *received_date) override
-        {
-            return subsystem3::Subsystem3::recordLabReceipt(
-                token, request_id, received_date);
-        }
-
-        JusticeFlow::ResultCode recordExaminationStart(
-            const char *token,
-            int request_id) override
-        {
-            return subsystem3::Subsystem3::recordExaminationStart(token, request_id);
-        }
-
-        JusticeFlow::ResultCode recordFindings(
-            const char *token,
-            int request_id,
-            const char *findings,
-            const char *report_file_path,
-            const char *delivery_date) override
-        {
-            return subsystem3::Subsystem3::recordFindings(
-                token, request_id, findings, report_file_path, delivery_date);
-        }
-
-        JusticeFlow::ResultCode recordAmendment(
-            const char *token,
-            int request_id,
-            const char *amended_findings) override
-        {
-            return subsystem3::Subsystem3::recordAmendment(
-                token, request_id, amended_findings);
-        }
-
-        JusticeFlow::ResultCode contestReport(
-            const char *token,
-            int request_id,
-            const char *contest_reason) override
-        {
-            return subsystem3::Subsystem3::contestReport(
-                token, request_id, contest_reason);
-        }
-
-        JusticeFlow::ResultCode getForensicRequestsByCase(
-            const char *token, int case_id,
-            std::vector<forensic::ForensicRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getForensicRequestsByCase(
-                token, case_id, out);
-        }
-
-        JusticeFlow::ResultCode getPendingForensicRequests(
-            const char *token, int station_id,
-            std::vector<forensic::ForensicRecord> &out) override
-        {
-            return subsystem3::Subsystem3::getPendingForensicRequests(
-                token, station_id, out);
-        }
-
-        JusticeFlow::ResultCode getEvidenceByForensicRequest(
-            const char *token, int request_id,
-            std::vector<forensic::EvidenceRef> &out) override
-        {
-            return subsystem3::Subsystem3::getEvidenceByForensicRequest(
-                token, request_id, out);
-        }
-    };
-
-    // =============================================================================
-    // Section 2 — SystemManager: Singleton + Lifecycle (Manager pattern)
-    // =============================================================================
-
-    SystemManager &SystemManager::getInstance()
-    {
-        // C++11 §6.7: thread-safe static local initialisation.
-        static SystemManager instance;
-        return instance;
+        T                       val{};
+        JusticeFlow::ResultCode rc{};
+        if (fn(val, rc))
+            return SystemResult<T>::success(std::move(val));
+        return SystemResult<T>::failure(rc);
     }
 
-    // ── Dependency Injection slots ────────────────────────────────────────────────
-
-    void SystemManager::injectAuth(std::unique_ptr<IAuthAdapter> adapter)
+    /**
+     * Overload for bool+out_code operations that produce no value (void).
+     */
+    template<typename Fn>
+    SystemResult<void> adapt_bool_void(Fn &&fn)
     {
-        auth_ = std::move(adapter);
+        JusticeFlow::ResultCode rc{};
+        if (fn(rc))
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
     }
 
-    void SystemManager::injectS1(std::unique_ptr<ISubsystem1Adapter> adapter)
+    /**
+     * Convert the S1/S3 ResultCode+out_value pattern into SystemResult<T>.
+     * Usage:
+     *   return adapt_rc<JusticeFlow::Case>(
+     *       [&](JusticeFlow::Case &out) {
+     *           return subsystem1::Subsystem1::getCaseById(conn, id, out);
+     *       });
+     */
+    template<typename T, typename Fn>
+    SystemResult<T> adapt_rc(Fn &&fn)
     {
-        s1_ = std::move(adapter);
+        T                       val{};
+        JusticeFlow::ResultCode rc = fn(val);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<T>::success(std::move(val));
+        return SystemResult<T>::failure(rc);
     }
 
-    void SystemManager::injectS2(std::unique_ptr<ISubsystem2Adapter> adapter)
+    /**
+     * Convert bare ResultCode into SystemResult<void>.
+     */
+    template<typename Fn>
+    SystemResult<void> adapt_rc_void(Fn &&fn)
     {
-        s2_ = std::move(adapter);
+        JusticeFlow::ResultCode rc = fn();
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
     }
 
-    void SystemManager::injectS3(std::unique_ptr<ISubsystem3Adapter> adapter)
+} // namespace detail
+
+// =============================================================================
+// Section 2 — Default Concrete Adapters
+// =============================================================================
+// These are process-internal — not declared in any public header.
+// They are constructed by SystemManager::init() when no injection is provided.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// DefaultAuthAdapter
+// -----------------------------------------------------------------------------
+
+class DefaultAuthAdapter final : public IAuthAdapter
+{
+public:
+    SystemResult<std::string> login(const char *cnic, const char *password) override
     {
-        s3_ = std::move(adapter);
+        std::string token;
+        JusticeFlow::ResultCode rc =
+            auth::AuthManager::getInstance().login(cnic, password, token);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<std::string>::success(std::move(token));
+        return SystemResult<std::string>::failure(rc);
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────────
-
-    JusticeFlow::ResultCode SystemManager::init(const char *audit_conninfo)
+    SystemResult<JusticeFlow::SessionContext> validateToken(const char *token) override
     {
-        Logger::info("[System] Initialising JusticeFlow SystemManager.");
-
-        // Install default adapters for any slot not pre-filled by injection.
-        if (!auth_)
-            auth_ = std::make_unique<DefaultAuthAdapter>();
-        if (!s1_)
-            s1_ = std::make_unique<DefaultSubsystem1Adapter>();
-        if (!s2_)
-            s2_ = std::make_unique<DefaultSubsystem2Adapter>();
-        if (!s3_)
-            s3_ = std::make_unique<DefaultSubsystem3Adapter>();
-
-        // Boot the S3 audit subsystem — it manages its own dedicated DB connection.
-        Logger::info("[System] Connecting S3 audit manager.");
-        JusticeFlow::ResultCode rc = subsystem3::Subsystem3::initAudit(audit_conninfo);
-        if (rc != JusticeFlow::ResultCode::OK)
-        {
-            Logger::error("[System] S3 audit init failed — system will not start.");
-            return rc;
-        }
-
-        initialized_ = true;
-        Logger::info("[System] SystemManager initialised successfully.");
-        return JusticeFlow::ResultCode::OK;
+        JusticeFlow::SessionContext session{};
+        JusticeFlow::ResultCode rc =
+            auth::AuthManager::getInstance().validateToken(token, session);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<JusticeFlow::SessionContext>::success(std::move(session));
+        return SystemResult<JusticeFlow::SessionContext>::failure(rc);
     }
 
-    void SystemManager::shutdown()
-    {
-        if (!initialized_)
-            return;
-
-        Logger::info("[System] Shutting down JusticeFlow SystemManager.");
-
-        // Tear down in reverse-init order.
-        // Auth and S1/S2 adapters hold no persistent resources beyond their
-        // delegated singletons; those own their own shutdown logic.
-        subsystem3::Subsystem3::shutdownAudit();
-        Logger::info("[System] S3 audit connection closed.");
-
-        initialized_ = false;
-        Logger::info("[System] SystemManager shutdown complete.");
-    }
-
-    // ── Init guard ────────────────────────────────────────────────────────────────
-
-    JusticeFlow::ResultCode SystemManager::guardInitialized(const char *caller) const
-    {
-        if (!initialized_)
-        {
-            Logger::error(
-                std::string("[System] ") + caller +
-                " called before SystemManager::init(). Aborting.");
-            return JusticeFlow::ResultCode::NOT_INITIALIZED;
-        }
-        return JusticeFlow::ResultCode::OK;
-    }
-
-    // =============================================================================
-    // Section 3 — Auth facade
-    // =============================================================================
-
-    JusticeFlow::ResultCode SystemManager::login(
-        const char *cnic,
-        const char *password,
-        std::string &out_token)
-    {
-        if (auto rc = guardInitialized("login");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return auth_->login(cnic, password, out_token);
-    }
-
-    JusticeFlow::ResultCode SystemManager::validateToken(
-        const char *token,
-        JusticeFlow::SessionContext &out_session)
-    {
-        if (auto rc = guardInitialized("validateToken");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return auth_->validateToken(token, out_session);
-    }
-
-    JusticeFlow::ResultCode SystemManager::validateRank(
+    SystemResult<void> validateRank(
         const JusticeFlow::SessionContext &session,
-        JusticeFlow::OfficerRank required_rank)
+        JusticeFlow::OfficerRank required) override
     {
-        if (auto rc = guardInitialized("validateRank");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return auth_->validateRank(session, required_rank);
+        JusticeFlow::ResultCode rc =
+            auth::AuthManager::getInstance().validateRank(session, required);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
     }
 
-    bool SystemManager::isDutyActive(int officer_id)
+    bool isDutyActive(int officer_id) override
     {
-        if (!initialized_)
-            return false;
-        return auth_->isDutyActive(officer_id);
+        return auth::AuthManager::getInstance().isDutyActive(officer_id);
     }
 
-    JusticeFlow::ResultCode SystemManager::refreshSession(const char *token)
+    SystemResult<void> refreshSession(const char *token) override
     {
-        if (auto rc = guardInitialized("refreshSession");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return auth_->refreshSession(token);
+        JusticeFlow::ResultCode rc =
+            auth::AuthManager::getInstance().refreshSession(token);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
     }
 
-    JusticeFlow::ResultCode SystemManager::logout(const char *token)
+    SystemResult<void> logout(const char *token) override
     {
-        if (auto rc = guardInitialized("logout");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return auth_->logout(token);
+        JusticeFlow::ResultCode rc =
+            auth::AuthManager::getInstance().logout(token);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
+    }
+};
+
+// -----------------------------------------------------------------------------
+// DefaultSubsystem1Adapter
+// Translates the all-static S1 API (bool+out_code / ResultCode+out-param)
+// into uniform SystemResult<T> using the Section-1 helpers.
+// -----------------------------------------------------------------------------
+
+class DefaultSubsystem1Adapter final : public ISubsystem1Adapter
+{
+public:
+    // ── Case CRUD ─────────────────────────────────────────────────────────────
+
+    SystemResult<int> registerCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        JusticeFlow::CaseType ct, time_t date,
+        const char *addr, const char *desc,
+        double lat, double lon, int station_id,
+        const char *cnic) override
+    {
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::registerCase(
+                    conn, session, ct, date, addr, desc,
+                    lat, lon, station_id, cnic, id, rc);
+            });
     }
 
-    // =============================================================================
-    // Section 4 — Subsystem 1 facade
-    // =============================================================================
-
-    // ── Case CRUD ─────────────────────────────────────────────────────────────────
-
-    bool SystemManager::registerCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        JusticeFlow::CaseType case_type,
-        time_t incident_date,
-        const char *incident_address,
-        const char *description,
-        double lat, double lon,
-        int station_id,
-        const char *complainant_cnic,
-        int &out_case_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<JusticeFlow::Case> getCaseById(PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("registerCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->registerCase(conn, session, case_type, incident_date,
-                                 incident_address, description, lat, lon,
-                                 station_id, complainant_cnic, out_case_id, out_code);
+        return detail::adapt_rc<JusticeFlow::Case>(
+            [&](JusticeFlow::Case &out) {
+                return subsystem1::Subsystem1::getCaseById(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getCaseById(
-        PGconn *conn, int case_id, JusticeFlow::Case &out)
+    SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(
+        PGconn *conn, int station_id) override
     {
-        if (auto rc = guardInitialized("getCaseById");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getCaseById(conn, case_id, out);
+        return detail::adapt_rc<std::vector<JusticeFlow::Case>>(
+            [&](std::vector<JusticeFlow::Case> &out) {
+                return subsystem1::Subsystem1::getCasesByStation(conn, station_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getCasesByStation(
-        PGconn *conn, int station_id, std::vector<JusticeFlow::Case> &out)
+    SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(
+        PGconn *conn, int station_id, JusticeFlow::CaseStatus status) override
     {
-        if (auto rc = guardInitialized("getCasesByStation");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getCasesByStation(conn, station_id, out);
+        return detail::adapt_rc<std::vector<JusticeFlow::Case>>(
+            [&](std::vector<JusticeFlow::Case> &out) {
+                return subsystem1::Subsystem1::getCasesByStatus(conn, station_id, status, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getCasesByStatus(
-        PGconn *conn, int station_id,
-        JusticeFlow::CaseStatus status,
-        std::vector<JusticeFlow::Case> &out)
+    // ── Status Transitions ────────────────────────────────────────────────────
+
+    SystemResult<void> updateCaseStatus(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, JusticeFlow::CaseStatus st, const char *reason) override
     {
-        if (auto rc = guardInitialized("getCasesByStatus");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getCasesByStatus(conn, station_id, status, out);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::updateCaseStatus(
+                    conn, session, case_id, st, reason, rc);
+            });
     }
 
-    // ── Status Transitions ────────────────────────────────────────────────────────
-
-    bool SystemManager::updateCaseStatus(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, JusticeFlow::CaseStatus new_status,
-        const char *reason, JusticeFlow::ResultCode &out_code)
+    SystemResult<void> closeCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *reason) override
     {
-        if ((out_code = guardInitialized("updateCaseStatus")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->updateCaseStatus(conn, session, case_id, new_status, reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::closeCase(conn, session, case_id, reason, rc);
+            });
     }
 
-    bool SystemManager::closeCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *closure_reason,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> reopenCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *reason) override
     {
-        if ((out_code = guardInitialized("closeCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->closeCase(conn, session, case_id, closure_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::reopenCase(conn, session, case_id, reason, rc);
+            });
     }
 
-    bool SystemManager::reopenCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *reopen_reason,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> transferCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, int to_station_id, const char *reason) override
     {
-        if ((out_code = guardInitialized("reopenCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->reopenCase(conn, session, case_id, reopen_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::transferCase(
+                    conn, session, case_id, to_station_id, reason, rc);
+            });
     }
 
-    bool SystemManager::transferCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, int to_station_id,
-        const char *transfer_reason,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("transferCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->transferCase(conn, session, case_id, to_station_id,
-                                 transfer_reason, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::CaseStatusLog>>(
+            [&](std::vector<JusticeFlow::CaseStatusLog> &out) {
+                return subsystem1::Subsystem1::getCaseStatusLog(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getCaseStatusLog(
-        PGconn *conn, int case_id,
-        std::vector<JusticeFlow::CaseStatusLog> &out)
+    // ── Officer Assignment ────────────────────────────────────────────────────
+
+    SystemResult<void> assignOfficerToCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, int officer_id, JusticeFlow::CaseOfficerRole role) override
     {
-        if (auto rc = guardInitialized("getCaseStatusLog");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getCaseStatusLog(conn, case_id, out);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::assignOfficerToCase(
+                    conn, session, case_id, officer_id, role, rc);
+            });
     }
 
-    // ── Officer Assignment ────────────────────────────────────────────────────────
-
-    bool SystemManager::assignOfficerToCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, int officer_id,
-        JusticeFlow::CaseOfficerRole role,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> relieveOfficerFromCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, int officer_id) override
     {
-        if ((out_code = guardInitialized("assignOfficerToCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->assignOfficerToCase(conn, session, case_id, officer_id, role, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::relieveOfficerFromCase(
+                    conn, session, case_id, officer_id, rc);
+            });
     }
 
-    bool SystemManager::relieveOfficerFromCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, int officer_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("relieveOfficerFromCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->relieveOfficerFromCase(conn, session, case_id, officer_id, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::CaseOfficer>>(
+            [&](std::vector<JusticeFlow::CaseOfficer> &out) {
+                return subsystem1::Subsystem1::getAssignedOfficers(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getAssignedOfficers(
-        PGconn *conn, int case_id,
-        std::vector<JusticeFlow::CaseOfficer> &out)
+    // ── Complainants ──────────────────────────────────────────────────────────
+
+    SystemResult<int> addComplainant(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *cnic,
+        JusticeFlow::RelationshipToVictim rel, bool notify) override
     {
-        if (auto rc = guardInitialized("getAssignedOfficers");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getAssignedOfficers(conn, case_id, out);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::addComplainant(
+                    conn, session, case_id, cnic, rel, notify, id, rc);
+            });
     }
 
-    // ── Complainants ──────────────────────────────────────────────────────────────
-
-    bool SystemManager::addComplainant(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *person_cnic,
-        JusticeFlow::RelationshipToVictim relation,
-        bool notify_on_update,
-        int &out_complainant_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> updateComplainantStatus(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int id, JusticeFlow::ComplainantStatus st, const char *reason) override
     {
-        if ((out_code = guardInitialized("addComplainant")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->addComplainant(conn, session, case_id, person_cnic,
-                                   relation, notify_on_update, out_complainant_id, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::updateComplainantStatus(
+                    conn, session, id, st, reason, rc);
+            });
     }
 
-    bool SystemManager::updateComplainantStatus(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int complainant_id,
-        JusticeFlow::ComplainantStatus new_status,
-        const char *reason, JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("updateComplainantStatus")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->updateComplainantStatus(conn, session, complainant_id,
-                                            new_status, reason, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::Complainant>>(
+            [&](std::vector<JusticeFlow::Complainant> &out) {
+                return subsystem1::Subsystem1::getComplainantsByCase(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getComplainantsByCase(
-        PGconn *conn, int case_id,
-        std::vector<JusticeFlow::Complainant> &out)
+    // ── Victims ───────────────────────────────────────────────────────────────
+
+    SystemResult<int> addVictim(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *cnic,
+        const char *injury_type, JusticeFlow::InjurySeverity sev,
+        JusticeFlow::VulnerabilityCategory vuln,
+        const char *medical_ref) override
     {
-        if (auto rc = guardInitialized("getComplainantsByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getComplainantsByCase(conn, case_id, out);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::addVictim(
+                    conn, session, case_id, cnic,
+                    injury_type, sev, vuln, medical_ref, id, rc);
+            });
     }
 
-    // ── Victims ───────────────────────────────────────────────────────────────────
-
-    bool SystemManager::addVictim(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *person_cnic,
-        const char *injury_type,
-        JusticeFlow::InjurySeverity injury_severity,
-        JusticeFlow::VulnerabilityCategory vulnerability,
-        const char *medical_report_ref,
-        int &out_victim_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("addVictim")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->addVictim(conn, session, case_id, person_cnic,
-                              injury_type, injury_severity, vulnerability,
-                              medical_report_ref, out_victim_id, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::Victim>>(
+            [&](std::vector<JusticeFlow::Victim> &out) {
+                return subsystem1::Subsystem1::getVictimsByCase(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getVictimsByCase(
-        PGconn *conn, int case_id, std::vector<JusticeFlow::Victim> &out)
+    // ── Witnesses ─────────────────────────────────────────────────────────────
+
+    SystemResult<int> addWitness(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *cnic,
+        const char *stmt, const char *file,
+        JusticeFlow::WitnessProtection prot, bool conceal) override
     {
-        if (auto rc = guardInitialized("getVictimsByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getVictimsByCase(conn, case_id, out);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::addWitness(
+                    conn, session, case_id, cnic,
+                    stmt, file, prot, conceal, id, rc);
+            });
     }
 
-    // ── Witnesses ─────────────────────────────────────────────────────────────────
-
-    bool SystemManager::addWitness(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *person_cnic,
-        const char *statement_text,
-        const char *statement_file_path,
-        JusticeFlow::WitnessProtection protection_status,
-        bool conceal_identity,
-        int &out_witness_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> updateWitnessProtection(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int witness_id, JusticeFlow::WitnessProtection st) override
     {
-        if ((out_code = guardInitialized("addWitness")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->addWitness(conn, session, case_id, person_cnic,
-                               statement_text, statement_file_path,
-                               protection_status, conceal_identity,
-                               out_witness_id, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::updateWitnessProtection(
+                    conn, session, witness_id, st, rc);
+            });
     }
 
-    bool SystemManager::updateWitnessProtection(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int witness_id,
-        JusticeFlow::WitnessProtection new_status,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("updateWitnessProtection")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->updateWitnessProtection(conn, session, witness_id, new_status, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::Witness>>(
+            [&](std::vector<JusticeFlow::Witness> &out) {
+                return subsystem1::Subsystem1::getWitnessesByCase(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getWitnessesByCase(
-        PGconn *conn, int case_id, std::vector<JusticeFlow::Witness> &out)
+    // ── Accused ───────────────────────────────────────────────────────────────
+
+    SystemResult<int> addAccused(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *cnic,
+        JusticeFlow::InvolvementType inv) override
     {
-        if (auto rc = guardInitialized("getWitnessesByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getWitnessesByCase(conn, case_id, out);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::addAccused(
+                    conn, session, case_id, cnic, inv, id, rc);
+            });
     }
 
-    // ── Accused ───────────────────────────────────────────────────────────────────
-
-    bool SystemManager::addAccused(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *person_cnic,
-        JusticeFlow::InvolvementType involvement,
-        int &out_accused_id,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> linkAccusedAssociation(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int accused_id, int assoc_id,
+        JusticeFlow::AssociationType atype) override
     {
-        if ((out_code = guardInitialized("addAccused")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->addAccused(conn, session, case_id, person_cnic,
-                               involvement, out_accused_id, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::linkAccusedAssociation(
+                    conn, session, accused_id, assoc_id, atype, rc);
+            });
     }
 
-    bool SystemManager::linkAccusedAssociation(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int accused_id, int associated_accused_id,
-        JusticeFlow::AssociationType association_type,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(
+        PGconn *conn, int case_id) override
     {
-        if ((out_code = guardInitialized("linkAccusedAssociation")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->linkAccusedAssociation(conn, session, accused_id,
-                                           associated_accused_id, association_type, out_code);
+        return detail::adapt_rc<std::vector<JusticeFlow::Accused>>(
+            [&](std::vector<JusticeFlow::Accused> &out) {
+                return subsystem1::Subsystem1::getAccusedByCase(conn, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getAccusedByCase(
-        PGconn *conn, int case_id, std::vector<JusticeFlow::Accused> &out)
-    {
-        if (auto rc = guardInitialized("getAccusedByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getAccusedByCase(conn, case_id, out);
-    }
+    // ── Vehicles ──────────────────────────────────────────────────────────────
 
-    // ── Vehicles ──────────────────────────────────────────────────────────────────
-
-    bool SystemManager::linkVehicleToCase(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
+    SystemResult<void> linkVehicleToCase(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
         int case_id, int vehicle_id,
-        JusticeFlow::VehicleRole role,
-        const char *condition_notes,
-        JusticeFlow::ResultCode &out_code)
+        JusticeFlow::VehicleRole role, const char *notes) override
     {
-        if ((out_code = guardInitialized("linkVehicleToCase")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->linkVehicleToCase(conn, session, case_id, vehicle_id,
-                                      role, condition_notes, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::linkVehicleToCase(
+                    conn, session, case_id, vehicle_id, role, notes, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getVehiclesByCase(
-        PGconn *conn, int case_id, std::vector<JusticeFlow::VehicleCase> &out)
+    SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(
+        PGconn *conn, int case_id) override
     {
-        if (auto rc = guardInitialized("getVehiclesByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getVehiclesByCase(conn, case_id, out);
+        return detail::adapt_rc<std::vector<JusticeFlow::VehicleCase>>(
+            [&](std::vector<JusticeFlow::VehicleCase> &out) {
+                return subsystem1::Subsystem1::getVehiclesByCase(conn, case_id, out);
+            });
     }
 
-    // ── Duty Scheduling ───────────────────────────────────────────────────────────
+    // ── Duty ──────────────────────────────────────────────────────────────────
 
-    bool SystemManager::scheduleDuty(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int officer_id, int station_id, int patrol_route_id,
-        JusticeFlow::ShiftType shift_type,
-        const char *duty_date,
-        time_t scheduled_start, time_t scheduled_end,
-        int &out_duty_id,
-        JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("scheduleDuty")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->scheduleDuty(conn, session, officer_id, station_id, patrol_route_id,
-                                 shift_type, duty_date, scheduled_start, scheduled_end,
-                                 out_duty_id, out_code);
-    }
-
-    bool SystemManager::markDutyStart(
+    SystemResult<int> scheduleDuty(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int duty_id, JusticeFlow::ResultCode &out_code)
+        int officer_id, int station_id, int route_id,
+        JusticeFlow::ShiftType st, const char *duty_date,
+        time_t start, time_t end) override
     {
-        if ((out_code = guardInitialized("markDutyStart")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->markDutyStart(conn, session, duty_id, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::scheduleDuty(
+                    conn, session, officer_id, station_id, route_id,
+                    st, duty_date, start, end, id, rc);
+            });
     }
 
-    bool SystemManager::markDutyEnd(
+    SystemResult<void> markDutyStart(
+        PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
+    {
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::markDutyStart(conn, session, duty_id, rc);
+            });
+    }
+
+    SystemResult<void> markDutyEnd(
+        PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
+    {
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::markDutyEnd(conn, session, duty_id, rc);
+            });
+    }
+
+    SystemResult<void> updateDutyStatus(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int duty_id, JusticeFlow::ResultCode &out_code)
+        int duty_id, JusticeFlow::DutyStatus st, const char *reason) override
     {
-        if ((out_code = guardInitialized("markDutyEnd")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->markDutyEnd(conn, session, duty_id, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::updateDutyStatus(
+                    conn, session, duty_id, st, reason, rc);
+            });
     }
 
-    bool SystemManager::updateDutyStatus(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int duty_id, JusticeFlow::DutyStatus new_status,
-        const char *absence_reason, JusticeFlow::ResultCode &out_code)
+    SystemResult<void> cancelDuty(
+        PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
     {
-        if ((out_code = guardInitialized("updateDutyStatus")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->updateDutyStatus(conn, session, duty_id, new_status,
-                                     absence_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::cancelDuty(conn, session, duty_id, rc);
+            });
     }
 
-    bool SystemManager::cancelDuty(
+    SystemResult<std::vector<JusticeFlow::DutyRoster>> getDutyRoster(
+        PGconn *conn, int station_id, const char *duty_date) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::DutyRoster>>(
+            [&](std::vector<JusticeFlow::DutyRoster> &out) {
+                return subsystem1::Subsystem1::getDutyRoster(conn, station_id, duty_date, out);
+            });
+    }
+
+    SystemResult<std::vector<JusticeFlow::DutyRoster>> getActiveDuties(
+        PGconn *conn, int station_id) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::DutyRoster>>(
+            [&](std::vector<JusticeFlow::DutyRoster> &out) {
+                return subsystem1::Subsystem1::getActiveDuties(conn, station_id, out);
+            });
+    }
+
+    SystemResult<std::vector<JusticeFlow::DutyRoster>> getOfficerDutyHistory(
+        PGconn *conn, int officer_id, time_t from, time_t to) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::DutyRoster>>(
+            [&](std::vector<JusticeFlow::DutyRoster> &out) {
+                return subsystem1::Subsystem1::getOfficerDutyHistory(conn, officer_id, from, to, out);
+            });
+    }
+
+    // ── Patrol Routes ─────────────────────────────────────────────────────────
+
+    SystemResult<int> createPatrolRoute(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int duty_id, JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("cancelDuty")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->cancelDuty(conn, session, duty_id, out_code);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getDutyRoster(
-        PGconn *conn, int station_id,
-        const char *duty_date, std::vector<JusticeFlow::DutyRoster> &out)
-    {
-        if (auto rc = guardInitialized("getDutyRoster");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getDutyRoster(conn, station_id, duty_date, out);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getActiveDuties(
-        PGconn *conn, int station_id, std::vector<JusticeFlow::DutyRoster> &out)
-    {
-        if (auto rc = guardInitialized("getActiveDuties");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getActiveDuties(conn, station_id, out);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getOfficerDutyHistory(
-        PGconn *conn, int officer_id,
-        time_t from, time_t to,
-        std::vector<JusticeFlow::DutyRoster> &out)
-    {
-        if (auto rc = guardInitialized("getOfficerDutyHistory");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficerDutyHistory(conn, officer_id, from, to, out);
-    }
-
-    // ── Patrol Routes ─────────────────────────────────────────────────────────────
-
-    bool SystemManager::createPatrolRoute(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
         int station_id, const char *beat_code,
-        const char *route_name, const char *area_description,
-        int &out_route_id, JusticeFlow::ResultCode &out_code)
+        const char *name, const char *area) override
     {
-        if ((out_code = guardInitialized("createPatrolRoute")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->createPatrolRoute(conn, session, station_id, beat_code,
-                                      route_name, area_description, out_route_id, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::createPatrolRoute(
+                    conn, session, station_id, beat_code, name, area, id, rc);
+            });
     }
 
-    bool SystemManager::deactivatePatrolRoute(
+    SystemResult<void> deactivatePatrolRoute(
+        PGconn *conn, const JusticeFlow::SessionContext &session, int route_id) override
+    {
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::deactivatePatrolRoute(
+                    conn, session, route_id, rc);
+            });
+    }
+
+    SystemResult<std::vector<JusticeFlow::PatrolRoute>> getPatrolRoutesByStation(
+        PGconn *conn, int station_id) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::PatrolRoute>>(
+            [&](std::vector<JusticeFlow::PatrolRoute> &out) {
+                return subsystem1::Subsystem1::getPatrolRoutesByStation(conn, station_id, out);
+            });
+    }
+
+    // ── Personnel ─────────────────────────────────────────────────────────────
+
+    SystemResult<JusticeFlow::Officer> getOfficerById(
+        PGconn *conn, int officer_id) override
+    {
+        return detail::adapt_rc<JusticeFlow::Officer>(
+            [&](JusticeFlow::Officer &out) {
+                return subsystem1::Subsystem1::getOfficerById(conn, officer_id, out);
+            });
+    }
+
+    SystemResult<JusticeFlow::Officer> getOfficerByCnic(
+        PGconn *conn, const char *cnic) override
+    {
+        return detail::adapt_rc<JusticeFlow::Officer>(
+            [&](JusticeFlow::Officer &out) {
+                return subsystem1::Subsystem1::getOfficerByCnic(conn, cnic, out);
+            });
+    }
+
+    SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStation(
+        PGconn *conn, int station_id) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::Officer>>(
+            [&](std::vector<JusticeFlow::Officer> &out) {
+                return subsystem1::Subsystem1::getOfficersByStation(conn, station_id, out);
+            });
+    }
+
+    SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStatus(
+        PGconn *conn, int station_id, JusticeFlow::OfficerStatus st) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::Officer>>(
+            [&](std::vector<JusticeFlow::Officer> &out) {
+                return subsystem1::Subsystem1::getOfficersByStatus(conn, station_id, st, out);
+            });
+    }
+
+    SystemResult<void> updateOfficerStatus(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int route_id, JusticeFlow::ResultCode &out_code)
+        int officer_id, JusticeFlow::OfficerStatus st) override
     {
-        if ((out_code = guardInitialized("deactivatePatrolRoute")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->deactivatePatrolRoute(conn, session, route_id, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::updateOfficerStatus(
+                    conn, session, officer_id, st, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getPatrolRoutesByStation(
-        PGconn *conn, int station_id,
-        std::vector<JusticeFlow::PatrolRoute> &out)
-    {
-        if (auto rc = guardInitialized("getPatrolRoutesByStation");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getPatrolRoutesByStation(conn, station_id, out);
-    }
-
-    // ── Personnel ─────────────────────────────────────────────────────────────────
-
-    JusticeFlow::ResultCode SystemManager::getOfficerById(
-        PGconn *conn, int officer_id, JusticeFlow::Officer &out)
-    {
-        if (auto rc = guardInitialized("getOfficerById");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficerById(conn, officer_id, out);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getOfficerByCnic(
-        PGconn *conn, const char *cnic, JusticeFlow::Officer &out)
-    {
-        if (auto rc = guardInitialized("getOfficerByCnic");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficerByCnic(conn, cnic, out);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getOfficersByStation(
-        PGconn *conn, int station_id, std::vector<JusticeFlow::Officer> &out)
-    {
-        if (auto rc = guardInitialized("getOfficersByStation");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficersByStation(conn, station_id, out);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getOfficersByStatus(
-        PGconn *conn, int station_id,
-        JusticeFlow::OfficerStatus status, std::vector<JusticeFlow::Officer> &out)
-    {
-        if (auto rc = guardInitialized("getOfficersByStatus");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficersByStatus(conn, station_id, status, out);
-    }
-
-    bool SystemManager::updateOfficerStatus(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int officer_id, JusticeFlow::OfficerStatus new_status,
-        JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("updateOfficerStatus")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->updateOfficerStatus(conn, session, officer_id, new_status, out_code);
-    }
-
-    bool SystemManager::promoteOfficer(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int officer_id, JusticeFlow::OfficerRank new_rank,
-        const char *new_belt_number, const char *promotion_type,
-        const char *effective_date, const char *order_date,
-        int &out_history_id, JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("promoteOfficer")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->promoteOfficer(conn, session, officer_id, new_rank,
-                                   new_belt_number, promotion_type,
-                                   effective_date, order_date,
-                                   out_history_id, out_code);
-    }
-
-    JusticeFlow::ResultCode SystemManager::getOfficerRankHistory(
-        PGconn *conn, int officer_id,
-        std::vector<JusticeFlow::OfficerRankHistory> &out)
-    {
-        if (auto rc = guardInitialized("getOfficerRankHistory");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficerRankHistory(conn, officer_id, out);
-    }
-
-    bool SystemManager::deployOfficer(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int officer_id, int to_station_id,
-        const char *deployment_reason, const char *order_number,
-        const char *deployed_from, const char *deployed_until,
-        int &out_deployment_id, JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("deployOfficer")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->deployOfficer(conn, session, officer_id, to_station_id,
-                                  deployment_reason, order_number,
-                                  deployed_from, deployed_until,
-                                  out_deployment_id, out_code);
-    }
-
-    bool SystemManager::endDeployment(
+    SystemResult<int> promoteOfficer(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int deployment_id, JusticeFlow::ResultCode &out_code)
+        int officer_id, JusticeFlow::OfficerRank rank,
+        const char *belt, const char *type,
+        const char *effective, const char *order_date) override
     {
-        if ((out_code = guardInitialized("endDeployment")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s1_->endDeployment(conn, session, deployment_id, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::promoteOfficer(
+                    conn, session, officer_id, rank,
+                    belt, type, effective, order_date, id, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getOfficerDeployments(
-        PGconn *conn, int officer_id, bool active_only,
-        std::vector<JusticeFlow::OfficerDeployment> &out)
+    SystemResult<std::vector<JusticeFlow::OfficerRankHistory>> getOfficerRankHistory(
+        PGconn *conn, int officer_id) override
     {
-        if (auto rc = guardInitialized("getOfficerDeployments");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->getOfficerDeployments(conn, officer_id, active_only, out);
+        return detail::adapt_rc<std::vector<JusticeFlow::OfficerRankHistory>>(
+            [&](std::vector<JusticeFlow::OfficerRankHistory> &out) {
+                return subsystem1::Subsystem1::getOfficerRankHistory(conn, officer_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::generateOfficerReport(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int officer_id,
-        subsystem1::ReportType type,
-        std::string &out_report_text)
+    SystemResult<int> deployOfficer(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int officer_id, int to_station,
+        const char *reason, const char *order_no,
+        const char *from_date, const char *until_date) override
     {
-        if (auto rc = guardInitialized("generateOfficerReport");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s1_->generateOfficerReport(conn, session, officer_id, type, out_report_text);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::deployOfficer(
+                    conn, session, officer_id, to_station,
+                    reason, order_no, from_date, until_date, id, rc);
+            });
     }
 
-    // =============================================================================
-    // Section 5 — Subsystem 2 facade
-    // =============================================================================
+    SystemResult<void> endDeployment(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int deployment_id) override
+    {
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem1::Subsystem1::endDeployment(conn, session, deployment_id, rc);
+            });
+    }
 
-    JusticeFlow::ResultCode SystemManager::registerFIR(
+    SystemResult<std::vector<JusticeFlow::OfficerDeployment>> getOfficerDeployments(
+        PGconn *conn, int officer_id, bool active_only) override
+    {
+        return detail::adapt_rc<std::vector<JusticeFlow::OfficerDeployment>>(
+            [&](std::vector<JusticeFlow::OfficerDeployment> &out) {
+                return subsystem1::Subsystem1::getOfficerDeployments(conn, officer_id, active_only, out);
+            });
+    }
+
+    SystemResult<std::string> generateOfficerReport(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int officer_id, subsystem1::ReportType type) override
+    {
+        return detail::adapt_rc<std::string>(
+            [&](std::string &out) {
+                return subsystem1::Subsystem1::generateOfficerReport(
+                    conn, session, officer_id, type, out);
+            });
+    }
+};
+
+// -----------------------------------------------------------------------------
+// DefaultSubsystem2Adapter
+// Wraps the Subsystem2 singleton.  S2 already returns ResultCode throughout;
+// Fix #3: entity out-params become unique_ptr inside SystemResult.
+// -----------------------------------------------------------------------------
+
+class DefaultSubsystem2Adapter final : public ISubsystem2Adapter
+{
+public:
+    SystemResult<std::unique_ptr<subsystem2::Case>> registerFIR(
         const subsystem2::FIRRegistrationRequest &request,
-        const JusticeFlow::SessionContext &session,
-        subsystem2::Case *&out_case)
+        const JusticeFlow::SessionContext &session) override
     {
-        if (auto rc = guardInitialized("registerFIR");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s2_->registerFIR(request, session, out_case);
+        subsystem2::Case *raw = nullptr;
+        JusticeFlow::ResultCode rc =
+            subsystem2::Subsystem2::getInstance().registerFIR(request, session, raw);
+        if (rc == JusticeFlow::ResultCode::OK && raw)
+            return SystemResult<std::unique_ptr<subsystem2::Case>>::success(
+                std::unique_ptr<subsystem2::Case>(raw));
+        return SystemResult<std::unique_ptr<subsystem2::Case>>::failure(rc);
     }
 
-    JusticeFlow::ResultCode SystemManager::logAndSecureEvidence(
-        int64_t case_id,
-        JusticeFlow::EvidenceType type,
-        const std::string &description,
-        const std::string &file_path,
-        const JusticeFlow::SessionContext &session,
-        subsystem2::Evidence *&out_evidence)
+    SystemResult<std::unique_ptr<subsystem2::Evidence>> logAndSecureEvidence(
+        int64_t case_id, JusticeFlow::EvidenceType type,
+        const std::string &desc, const std::string &file_path,
+        const JusticeFlow::SessionContext &session) override
     {
-        if (auto rc = guardInitialized("logAndSecureEvidence");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s2_->logAndSecureEvidence(case_id, type, description, file_path,
-                                         session, out_evidence);
+        subsystem2::Evidence *raw = nullptr;
+        JusticeFlow::ResultCode rc =
+            subsystem2::Subsystem2::getInstance().logAndSecureEvidence(
+                case_id, type, desc, file_path, session, raw);
+        if (rc == JusticeFlow::ResultCode::OK && raw)
+            return SystemResult<std::unique_ptr<subsystem2::Evidence>>::success(
+                std::unique_ptr<subsystem2::Evidence>(raw));
+        return SystemResult<std::unique_ptr<subsystem2::Evidence>>::failure(rc);
     }
 
-    JusticeFlow::ResultCode SystemManager::draftChargeSheet(
-        int64_t case_id,
-        const JusticeFlow::SessionContext &session,
-        subsystem2::ChargeSheet *&out_sheet)
+    SystemResult<std::unique_ptr<subsystem2::ChargeSheet>> draftChargeSheet(
+        int64_t case_id, const JusticeFlow::SessionContext &session) override
     {
-        if (auto rc = guardInitialized("draftChargeSheet");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s2_->draftChargeSheet(case_id, session, out_sheet);
+        subsystem2::ChargeSheet *raw = nullptr;
+        JusticeFlow::ResultCode rc =
+            subsystem2::Subsystem2::getInstance().draftChargeSheet(case_id, session, raw);
+        if (rc == JusticeFlow::ResultCode::OK && raw)
+            return SystemResult<std::unique_ptr<subsystem2::ChargeSheet>>::success(
+                std::unique_ptr<subsystem2::ChargeSheet>(raw));
+        return SystemResult<std::unique_ptr<subsystem2::ChargeSheet>>::failure(rc);
     }
 
-    JusticeFlow::ResultCode SystemManager::submitChargeSheet(
+    SystemResult<void> submitChargeSheet(
         subsystem2::ChargeSheet *sheet,
-        const JusticeFlow::SessionContext &session)
+        const JusticeFlow::SessionContext &session) override
     {
-        if (auto rc = guardInitialized("submitChargeSheet");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s2_->submitChargeSheet(sheet, session);
+        JusticeFlow::ResultCode rc =
+            subsystem2::Subsystem2::getInstance().submitChargeSheet(sheet, session);
+        if (rc == JusticeFlow::ResultCode::OK)
+            return SystemResult<void>::success();
+        return SystemResult<void>::failure(rc);
     }
 
-    JusticeFlow::ResultCode SystemManager::fetchCase(
-        int64_t case_id, subsystem2::Case *&out_case)
+    SystemResult<std::unique_ptr<subsystem2::Case>> fetchCase(int64_t case_id) override
     {
-        if (auto rc = guardInitialized("fetchCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s2_->fetchCase(case_id, out_case);
+        subsystem2::Case *raw = nullptr;
+        JusticeFlow::ResultCode rc =
+            subsystem2::Subsystem2::getInstance().fetchCase(case_id, raw);
+        if (rc == JusticeFlow::ResultCode::OK && raw)
+            return SystemResult<std::unique_ptr<subsystem2::Case>>::success(
+                std::unique_ptr<subsystem2::Case>(raw));
+        return SystemResult<std::unique_ptr<subsystem2::Case>>::failure(rc);
+    }
+};
+
+// -----------------------------------------------------------------------------
+// DefaultSubsystem3Adapter
+// Wraps the mixed-convention Subsystem3 static facade.
+// Audit lifecycle is managed by SystemManager::init/shutdown, not here.
+// -----------------------------------------------------------------------------
+
+class DefaultSubsystem3Adapter final : public ISubsystem3Adapter
+{
+public:
+    // ── Audit ─────────────────────────────────────────────────────────────────
+
+    SystemResult<std::vector<audit::AuditRecord>> getAuditChangeHistory(
+        int case_id) override
+    {
+        return detail::adapt_rc<std::vector<audit::AuditRecord>>(
+            [&](std::vector<audit::AuditRecord> &out) {
+                return subsystem3::Subsystem3::getAuditChangeHistory(case_id, out);
+            });
     }
 
-    // =============================================================================
-    // Section 6 — Subsystem 3 facade
-    // =============================================================================
-
-    // ── Audit ─────────────────────────────────────────────────────────────────────
-
-    JusticeFlow::ResultCode SystemManager::getAuditChangeHistory(
-        int case_id, std::vector<audit::AuditRecord> &out)
+    SystemResult<std::vector<audit::AuditRecord>> getAuditOfficerActions(
+        int officer_id, time_t from, time_t to) override
     {
-        if (auto rc = guardInitialized("getAuditChangeHistory");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getAuditChangeHistory(case_id, out);
+        return detail::adapt_rc<std::vector<audit::AuditRecord>>(
+            [&](std::vector<audit::AuditRecord> &out) {
+                return subsystem3::Subsystem3::getAuditOfficerActions(officer_id, from, to, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getAuditOfficerActions(
-        int officer_id, time_t from, time_t to,
-        std::vector<audit::AuditRecord> &out)
+    SystemResult<std::vector<audit::AuditRecord>> getAuditTableChanges(
+        const char *table_name, int record_id) override
     {
-        if (auto rc = guardInitialized("getAuditOfficerActions");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getAuditOfficerActions(officer_id, from, to, out);
+        return detail::adapt_rc<std::vector<audit::AuditRecord>>(
+            [&](std::vector<audit::AuditRecord> &out) {
+                return subsystem3::Subsystem3::getAuditTableChanges(table_name, record_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getAuditTableChanges(
-        const char *table_name, int record_id,
-        std::vector<audit::AuditRecord> &out)
+    SystemResult<std::vector<audit::AuditRecord>> auditQueryByTimeWindow(
+        time_t from, time_t to) override
     {
-        if (auto rc = guardInitialized("getAuditTableChanges");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getAuditTableChanges(table_name, record_id, out);
+        return detail::adapt_rc<std::vector<audit::AuditRecord>>(
+            [&](std::vector<audit::AuditRecord> &out) {
+                return subsystem3::Subsystem3::auditQueryByTimeWindow(from, to, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::auditQueryByTimeWindow(
-        time_t from, time_t to, std::vector<audit::AuditRecord> &out)
+    SystemResult<std::vector<audit::AuditRecord>> detectSuspiciousActivity(
+        int station_id) override
     {
-        if (auto rc = guardInitialized("auditQueryByTimeWindow");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->auditQueryByTimeWindow(from, to, out);
+        return detail::adapt_rc<std::vector<audit::AuditRecord>>(
+            [&](std::vector<audit::AuditRecord> &out) {
+                return subsystem3::Subsystem3::detectSuspiciousActivity(station_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::detectSuspiciousActivity(
-        int station_id, std::vector<audit::AuditRecord> &out)
-    {
-        if (auto rc = guardInitialized("detectSuspiciousActivity");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->detectSuspiciousActivity(station_id, out);
-    }
+    // ── Warrants ──────────────────────────────────────────────────────────────
 
-    // ── Warrants ──────────────────────────────────────────────────────────────────
-
-    bool SystemManager::requestWarrant(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *accused_cnic,
-        JusticeFlow::WarrantType warrant_type,
-        const char *magistrate_name, const char *issuing_court,
-        const char *valid_until, const char *target_address,
-        int &out_warrant_id, JusticeFlow::ResultCode &out_code)
-    {
-        if ((out_code = guardInitialized("requestWarrant")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->requestWarrant(conn, session, case_id, accused_cnic,
-                                   warrant_type, magistrate_name, issuing_court, valid_until,
-                                   target_address, out_warrant_id, out_code);
-    }
-
-    bool SystemManager::executeWarrant(
+    SystemResult<int> requestWarrant(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int warrant_id, JusticeFlow::ResultCode &out_code)
+        int case_id, const char *accused_cnic, JusticeFlow::WarrantType wt,
+        const char *magistrate, const char *court,
+        const char *valid_until, const char *target_address) override
     {
-        if ((out_code = guardInitialized("executeWarrant")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->executeWarrant(conn, session, warrant_id, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::requestWarrant(
+                    conn, session, case_id, accused_cnic, wt,
+                    magistrate, court, valid_until, target_address, id, rc);
+            });
     }
 
-    bool SystemManager::cancelWarrant(
+    SystemResult<void> executeWarrant(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int warrant_id, const char *cancellation_reason,
-        JusticeFlow::ResultCode &out_code)
+        int warrant_id) override
     {
-        if ((out_code = guardInitialized("cancelWarrant")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->cancelWarrant(conn, session, warrant_id,
-                                  cancellation_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::executeWarrant(conn, session, warrant_id, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getWarrantsByCase(
-        PGconn *conn, int case_id,
-        std::vector<enforcement::WarrantRecord> &out)
+    SystemResult<void> cancelWarrant(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int warrant_id, const char *reason) override
     {
-        if (auto rc = guardInitialized("getWarrantsByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getWarrantsByCase(conn, case_id, out);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::cancelWarrant(conn, session, warrant_id, reason, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getActiveWarrants(
-        PGconn *conn, int station_id,
-        std::vector<enforcement::WarrantRecord> &out)
+    SystemResult<std::vector<enforcement::WarrantRecord>> getWarrantsByCase(
+        PGconn *conn, int case_id) override
     {
-        if (auto rc = guardInitialized("getActiveWarrants");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getActiveWarrants(conn, station_id, out);
+        return detail::adapt_rc<std::vector<enforcement::WarrantRecord>>(
+            [&](std::vector<enforcement::WarrantRecord> &out) {
+                return subsystem3::Subsystem3::getWarrantsByCase(conn, case_id, out);
+            });
     }
 
-    // ── Arrests ───────────────────────────────────────────────────────────────────
-
-    bool SystemManager::recordArrest(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int case_id, const char *accused_cnic,
-        const char *arrest_location, int warrant_id,
-        int &out_arrest_id, JusticeFlow::ResultCode &out_code)
+    SystemResult<std::vector<enforcement::WarrantRecord>> getActiveWarrants(
+        PGconn *conn, int station_id) override
     {
-        if ((out_code = guardInitialized("recordArrest")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->recordArrest(conn, session, case_id, accused_cnic,
-                                 arrest_location, warrant_id, out_arrest_id, out_code);
+        return detail::adapt_rc<std::vector<enforcement::WarrantRecord>>(
+            [&](std::vector<enforcement::WarrantRecord> &out) {
+                return subsystem3::Subsystem3::getActiveWarrants(conn, station_id, out);
+            });
     }
 
-    bool SystemManager::updateCustodyStatus(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int arrest_id, JusticeFlow::CustodyStatus new_status,
-        const char *reason, JusticeFlow::ResultCode &out_code)
+    // ── Arrests ───────────────────────────────────────────────────────────────
+
+    SystemResult<int> recordArrest(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int case_id, const char *cnic,
+        const char *location, int warrant_id) override
     {
-        if ((out_code = guardInitialized("updateCustodyStatus")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->updateCustodyStatus(conn, session, arrest_id,
-                                        new_status, reason, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::recordArrest(
+                    conn, session, case_id, cnic, location, warrant_id, id, rc);
+            });
     }
 
-    bool SystemManager::markArrestAsDisputed(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int arrest_id, const char *dispute_reason,
-        JusticeFlow::ResultCode &out_code)
+    SystemResult<void> updateCustodyStatus(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int arrest_id, JusticeFlow::CustodyStatus st, const char *reason) override
     {
-        if ((out_code = guardInitialized("markArrestAsDisputed")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->markArrestAsDisputed(conn, session, arrest_id,
-                                         dispute_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::updateCustodyStatus(
+                    conn, session, arrest_id, st, reason, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getArrestsByCase(
-        PGconn *conn, int case_id,
-        std::vector<enforcement::ArrestRecord> &out)
+    SystemResult<void> markArrestAsDisputed(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int arrest_id, const char *reason) override
     {
-        if (auto rc = guardInitialized("getArrestsByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getArrestsByCase(conn, case_id, out);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::markArrestAsDisputed(
+                    conn, session, arrest_id, reason, rc);
+            });
     }
 
-    // ── Bail ──────────────────────────────────────────────────────────────────────
+    SystemResult<std::vector<enforcement::ArrestRecord>> getArrestsByCase(
+        PGconn *conn, int case_id) override
+    {
+        return detail::adapt_rc<std::vector<enforcement::ArrestRecord>>(
+            [&](std::vector<enforcement::ArrestRecord> &out) {
+                return subsystem3::Subsystem3::getArrestsByCase(conn, case_id, out);
+            });
+    }
 
-    bool SystemManager::recordBail(
-        PGconn *conn,
-        const JusticeFlow::SessionContext &session,
-        int arrest_id, JusticeFlow::BailType bail_type,
-        uint64_t bail_amount_paise,
-        const char *court_name, const char *magistrate_name,
-        const char *valid_until,
+    // ── Bail ──────────────────────────────────────────────────────────────────
+
+    SystemResult<int> recordBail(
+        PGconn *conn, const JusticeFlow::SessionContext &session,
+        int arrest_id, JusticeFlow::BailType bt, uint64_t amount,
+        const char *court, const char *magistrate, const char *valid_until,
         const char *surety_name, const char *surety_cnic,
-        const char *surety_contact,
-        int &out_bail_id, JusticeFlow::ResultCode &out_code)
+        const char *surety_contact) override
     {
-        if ((out_code = guardInitialized("recordBail")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->recordBail(conn, session, arrest_id, bail_type, bail_amount_paise,
-                               court_name, magistrate_name, valid_until,
-                               surety_name, surety_cnic, surety_contact,
-                               out_bail_id, out_code);
+        return detail::adapt_bool<int>(
+            [&](int &id, JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::recordBail(
+                    conn, session, arrest_id, bt, amount,
+                    court, magistrate, valid_until,
+                    surety_name, surety_cnic, surety_contact, id, rc);
+            });
     }
 
-    bool SystemManager::revokeBail(
+    SystemResult<void> revokeBail(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        int bail_id, const char *revocation_reason,
-        JusticeFlow::ResultCode &out_code)
+        int bail_id, const char *reason) override
     {
-        if ((out_code = guardInitialized("revokeBail")) !=
-            JusticeFlow::ResultCode::OK)
-            return false;
-        return s3_->revokeBail(conn, session, bail_id, revocation_reason, out_code);
+        return detail::adapt_bool_void(
+            [&](JusticeFlow::ResultCode &rc) {
+                return subsystem3::Subsystem3::revokeBail(conn, session, bail_id, reason, rc);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getBailByArrest(
-        PGconn *conn, int arrest_id, enforcement::BailRecord &out)
+    SystemResult<enforcement::BailRecord> getBailByArrest(
+        PGconn *conn, int arrest_id) override
     {
-        if (auto rc = guardInitialized("getBailByArrest");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getBailByArrest(conn, arrest_id, out);
+        return detail::adapt_rc<enforcement::BailRecord>(
+            [&](enforcement::BailRecord &out) {
+                return subsystem3::Subsystem3::getBailByArrest(conn, arrest_id, out);
+            });
     }
 
-    // ── Forensic & Lab ────────────────────────────────────────────────────────────
+    // ── Forensic & Lab ────────────────────────────────────────────────────────
 
-    JusticeFlow::ResultCode SystemManager::createForensicRequest(
+    SystemResult<int> createForensicRequest(
         const char *token, int case_id,
-        const char *examination_purpose, const char *purpose_description,
-        const char *lab_name, const char *examiner_name,
-        int &out_request_id)
+        const char *purpose, const char *purpose_desc,
+        const char *lab_name, const char *examiner_name) override
     {
-        if (auto rc = guardInitialized("createForensicRequest");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->createForensicRequest(token, case_id,
-                                          examination_purpose, purpose_description,
-                                          lab_name, examiner_name, out_request_id);
+        return detail::adapt_rc<int>(
+            [&](int &id) {
+                return subsystem3::Subsystem3::createForensicRequest(
+                    token, case_id, purpose, purpose_desc,
+                    lab_name, examiner_name, id);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::linkEvidence(
+    SystemResult<void> linkEvidence(
         const char *token, int request_id,
-        int evidence_id, const char *notes)
+        int evidence_id, const char *notes) override
     {
-        if (auto rc = guardInitialized("linkEvidence");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->linkEvidence(token, request_id, evidence_id, notes);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::linkEvidence(token, request_id, evidence_id, notes);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::recordLabReceipt(
-        const char *token, int request_id, const char *received_date)
+    SystemResult<void> recordLabReceipt(
+        const char *token, int request_id, const char *date) override
     {
-        if (auto rc = guardInitialized("recordLabReceipt");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->recordLabReceipt(token, request_id, received_date);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::recordLabReceipt(token, request_id, date);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::recordExaminationStart(
-        const char *token, int request_id)
+    SystemResult<void> recordExaminationStart(
+        const char *token, int request_id) override
     {
-        if (auto rc = guardInitialized("recordExaminationStart");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->recordExaminationStart(token, request_id);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::recordExaminationStart(token, request_id);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::recordFindings(
+    SystemResult<void> recordFindings(
         const char *token, int request_id,
-        const char *findings, const char *report_file_path,
-        const char *delivery_date)
+        const char *findings, const char *file_path,
+        const char *delivery_date) override
     {
-        if (auto rc = guardInitialized("recordFindings");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->recordFindings(token, request_id, findings,
-                                   report_file_path, delivery_date);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::recordFindings(
+                    token, request_id, findings, file_path, delivery_date);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::recordAmendment(
-        const char *token, int request_id, const char *amended_findings)
+    SystemResult<void> recordAmendment(
+        const char *token, int request_id, const char *amended) override
     {
-        if (auto rc = guardInitialized("recordAmendment");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->recordAmendment(token, request_id, amended_findings);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::recordAmendment(token, request_id, amended);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::contestReport(
-        const char *token, int request_id, const char *contest_reason)
+    SystemResult<void> contestReport(
+        const char *token, int request_id, const char *reason) override
     {
-        if (auto rc = guardInitialized("contestReport");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->contestReport(token, request_id, contest_reason);
+        return detail::adapt_rc_void(
+            [&]() {
+                return subsystem3::Subsystem3::contestReport(token, request_id, reason);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getForensicRequestsByCase(
-        const char *token, int case_id,
-        std::vector<forensic::ForensicRecord> &out)
+    SystemResult<std::vector<forensic::ForensicRecord>> getForensicRequestsByCase(
+        const char *token, int case_id) override
     {
-        if (auto rc = guardInitialized("getForensicRequestsByCase");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getForensicRequestsByCase(token, case_id, out);
+        return detail::adapt_rc<std::vector<forensic::ForensicRecord>>(
+            [&](std::vector<forensic::ForensicRecord> &out) {
+                return subsystem3::Subsystem3::getForensicRequestsByCase(token, case_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getPendingForensicRequests(
-        const char *token, int station_id,
-        std::vector<forensic::ForensicRecord> &out)
+    SystemResult<std::vector<forensic::ForensicRecord>> getPendingForensicRequests(
+        const char *token, int station_id) override
     {
-        if (auto rc = guardInitialized("getPendingForensicRequests");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getPendingForensicRequests(token, station_id, out);
+        return detail::adapt_rc<std::vector<forensic::ForensicRecord>>(
+            [&](std::vector<forensic::ForensicRecord> &out) {
+                return subsystem3::Subsystem3::getPendingForensicRequests(token, station_id, out);
+            });
     }
 
-    JusticeFlow::ResultCode SystemManager::getEvidenceByForensicRequest(
-        const char *token, int request_id,
-        std::vector<forensic::EvidenceRef> &out)
+    SystemResult<std::vector<forensic::EvidenceRef>> getEvidenceByForensicRequest(
+        const char *token, int request_id) override
     {
-        if (auto rc = guardInitialized("getEvidenceByForensicRequest");
-            rc != JusticeFlow::ResultCode::OK)
-            return rc;
-        return s3_->getEvidenceByForensicRequest(token, request_id, out);
+        return detail::adapt_rc<std::vector<forensic::EvidenceRef>>(
+            [&](std::vector<forensic::EvidenceRef> &out) {
+                return subsystem3::Subsystem3::getEvidenceByForensicRequest(token, request_id, out);
+            });
     }
+};
+
+// =============================================================================
+// Section 3 — SystemManager: Singleton + Lifecycle
+// =============================================================================
+
+SystemManager &SystemManager::getInstance()
+{
+    static SystemManager instance; // C++11 §6.7: thread-safe
+    return instance;
+}
+
+// ── Fix #7: injection guard ───────────────────────────────────────────────────
+
+void SystemManager::assertNotInitialized(const char *caller) const
+{
+    if (initialized_.load(std::memory_order_acquire))
+    {
+        throw std::logic_error(
+            std::string("[System] ") + caller +
+            " called after init(). Adapter injection must precede init().");
+    }
+}
+
+void SystemManager::injectAuth(std::unique_ptr<IAuthAdapter> adapter)
+{
+    assertNotInitialized("injectAuth");
+    auth_adapter_ = std::move(adapter);
+}
+
+void SystemManager::injectS1(std::unique_ptr<ISubsystem1Adapter> adapter)
+{
+    assertNotInitialized("injectS1");
+    s1_adapter_ = std::move(adapter);
+}
+
+void SystemManager::injectS2(std::unique_ptr<ISubsystem2Adapter> adapter)
+{
+    assertNotInitialized("injectS2");
+    s2_adapter_ = std::move(adapter);
+}
+
+void SystemManager::injectS3(std::unique_ptr<ISubsystem3Adapter> adapter)
+{
+    assertNotInitialized("injectS3");
+    s3_adapter_ = std::move(adapter);
+}
+
+// ── Fix #4: staged init ───────────────────────────────────────────────────────
+
+SystemResult<void> SystemManager::init(const SystemInitConfig &config)
+{
+    Logger::info("[System] Initialising JusticeFlow SystemManager.");
+
+    // ── Stage 1: install default adapters for any uninjected slot ─────────────
+    if (!auth_adapter_) auth_adapter_ = std::make_unique<DefaultAuthAdapter>();
+    if (!s1_adapter_)   s1_adapter_   = std::make_unique<DefaultSubsystem1Adapter>();
+    if (!s2_adapter_)   s2_adapter_   = std::make_unique<DefaultSubsystem2Adapter>();
+    if (!s3_adapter_)   s3_adapter_   = std::make_unique<DefaultSubsystem3Adapter>();
+
+    // ── Stage 2: Auth init (no external I/O; AuthManager boots on first use) ──
+    Logger::info("[System] Stage 2: Auth ready.");
+
+    // ── Stage 3: S1 + S2 are stateless; nothing to boot ──────────────────────
+    Logger::info("[System] Stage 3: S1/S2 adapters ready.");
+
+    // ── Stage 4: S3 audit — opens a dedicated read-only DB connection ─────────
+    Logger::info("[System] Stage 4: Connecting S3 audit subsystem.");
+    JusticeFlow::ResultCode rc =
+        subsystem3::Subsystem3::initAudit(config.audit_db_conninfo);
+    if (rc != JusticeFlow::ResultCode::OK)
+    {
+        Logger::error("[System] Stage 4 failed: S3 audit connection refused. Aborting init.");
+        return SystemResult<void>::failure(rc);
+    }
+    Logger::info("[System] Stage 4: S3 audit connected.");
+
+    // ── Stage 5: wire sub-facades to their adapter raw pointers ──────────────
+    auth_facade_.setAdapter(auth_adapter_.get());
+    case_facade_.setAdapter(s1_adapter_.get());
+    inv_facade_.setAdapter(s2_adapter_.get());
+    personnel_facade_.setAdapter(s1_adapter_.get());
+    duty_facade_.setAdapter(s1_adapter_.get());
+    enforcement_facade_.setAdapter(s3_adapter_.get());
+    audit_facade_.setAdapter(s3_adapter_.get());
+    forensic_facade_.setAdapter(s3_adapter_.get());
+
+    // Fix #5: release ordering ensures facade pointers are visible before flag
+    initialized_.store(true, std::memory_order_release);
+    Logger::info("[System] SystemManager fully initialised.");
+    return SystemResult<void>::success();
+}
+
+void SystemManager::shutdown()
+{
+    if (!initialized_.load(std::memory_order_acquire))
+        return;
+
+    Logger::info("[System] Shutting down JusticeFlow SystemManager.");
+
+    // Reverse-init order: Stage 4 first
+    subsystem3::Subsystem3::shutdownAudit();
+    Logger::info("[System] S3 audit connection closed.");
+
+    // Stages 3, 2 — stateless adapters; nothing to tear down
+
+    // Nullify facade adapter pointers before releasing adapters
+    forensic_facade_.setAdapter(nullptr);
+    audit_facade_.setAdapter(nullptr);
+    enforcement_facade_.setAdapter(nullptr);
+    duty_facade_.setAdapter(nullptr);
+    personnel_facade_.setAdapter(nullptr);
+    inv_facade_.setAdapter(nullptr);
+    case_facade_.setAdapter(nullptr);
+    auth_facade_.setAdapter(nullptr);
+
+    // Release adapters (unique_ptr destructor handles deallocation)
+    s3_adapter_.reset();
+    s2_adapter_.reset();
+    s1_adapter_.reset();
+    auth_adapter_.reset();
+
+    initialized_.store(false, std::memory_order_release);
+    Logger::info("[System] SystemManager shutdown complete.");
+}
+
+// =============================================================================
+// Section 4 — AuthFacade
+// =============================================================================
+
+SystemResult<std::string> AuthFacade::login(const char *cnic, const char *password)
+{
+    return adapter_->login(cnic, password);
+}
+
+SystemResult<JusticeFlow::SessionContext> AuthFacade::validateToken(const char *token)
+{
+    return adapter_->validateToken(token);
+}
+
+SystemResult<void> AuthFacade::validateRank(
+    const JusticeFlow::SessionContext &s, JusticeFlow::OfficerRank required)
+{
+    return adapter_->validateRank(s, required);
+}
+
+bool AuthFacade::isDutyActive(int officer_id)
+{
+    return adapter_->isDutyActive(officer_id);
+}
+
+SystemResult<void> AuthFacade::refreshSession(const char *token)
+{
+    return adapter_->refreshSession(token);
+}
+
+SystemResult<void> AuthFacade::logout(const char *token)
+{
+    return adapter_->logout(token);
+}
+
+// =============================================================================
+// Section 5 — CaseFacade
+// =============================================================================
+
+SystemResult<int> CaseFacade::registerCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    JusticeFlow::CaseType ct, time_t date,
+    const char *addr, const char *desc,
+    double lat, double lon, int station_id, const char *cnic)
+{
+    return s1_->registerCase(conn, session, ct, date, addr, desc, lat, lon, station_id, cnic);
+}
+
+SystemResult<JusticeFlow::Case> CaseFacade::getCaseById(PGconn *conn, int case_id)
+{
+    return s1_->getCaseById(conn, case_id);
+}
+
+SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStation(
+    PGconn *conn, int station_id)
+{
+    return s1_->getCasesByStation(conn, station_id);
+}
+
+SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStatus(
+    PGconn *conn, int station_id, JusticeFlow::CaseStatus st)
+{
+    return s1_->getCasesByStatus(conn, station_id, st);
+}
+
+SystemResult<void> CaseFacade::updateCaseStatus(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, JusticeFlow::CaseStatus st, const char *reason)
+{
+    return s1_->updateCaseStatus(conn, session, case_id, st, reason);
+}
+
+SystemResult<void> CaseFacade::closeCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *reason)
+{
+    return s1_->closeCase(conn, session, case_id, reason);
+}
+
+SystemResult<void> CaseFacade::reopenCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *reason)
+{
+    return s1_->reopenCase(conn, session, case_id, reason);
+}
+
+SystemResult<void> CaseFacade::transferCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, int to_station_id, const char *reason)
+{
+    return s1_->transferCase(conn, session, case_id, to_station_id, reason);
+}
+
+SystemResult<std::vector<JusticeFlow::CaseStatusLog>> CaseFacade::getCaseStatusLog(
+    PGconn *conn, int case_id)
+{
+    return s1_->getCaseStatusLog(conn, case_id);
+}
+
+SystemResult<void> CaseFacade::assignOfficerToCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, int officer_id, JusticeFlow::CaseOfficerRole role)
+{
+    return s1_->assignOfficerToCase(conn, session, case_id, officer_id, role);
+}
+
+SystemResult<void> CaseFacade::relieveOfficerFromCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, int officer_id)
+{
+    return s1_->relieveOfficerFromCase(conn, session, case_id, officer_id);
+}
+
+SystemResult<std::vector<JusticeFlow::CaseOfficer>> CaseFacade::getAssignedOfficers(
+    PGconn *conn, int case_id)
+{
+    return s1_->getAssignedOfficers(conn, case_id);
+}
+
+SystemResult<int> CaseFacade::addComplainant(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *cnic,
+    JusticeFlow::RelationshipToVictim rel, bool notify)
+{
+    return s1_->addComplainant(conn, session, case_id, cnic, rel, notify);
+}
+
+SystemResult<void> CaseFacade::updateComplainantStatus(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int id, JusticeFlow::ComplainantStatus st, const char *reason)
+{
+    return s1_->updateComplainantStatus(conn, session, id, st, reason);
+}
+
+SystemResult<std::vector<JusticeFlow::Complainant>> CaseFacade::getComplainantsByCase(
+    PGconn *conn, int case_id)
+{
+    return s1_->getComplainantsByCase(conn, case_id);
+}
+
+SystemResult<int> CaseFacade::addVictim(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *cnic,
+    const char *injury_type, JusticeFlow::InjurySeverity sev,
+    JusticeFlow::VulnerabilityCategory vuln, const char *medical_ref)
+{
+    return s1_->addVictim(conn, session, case_id, cnic, injury_type, sev, vuln, medical_ref);
+}
+
+SystemResult<std::vector<JusticeFlow::Victim>> CaseFacade::getVictimsByCase(
+    PGconn *conn, int case_id)
+{
+    return s1_->getVictimsByCase(conn, case_id);
+}
+
+SystemResult<int> CaseFacade::addWitness(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *cnic,
+    const char *statement, const char *file_path,
+    JusticeFlow::WitnessProtection prot, bool conceal)
+{
+    return s1_->addWitness(conn, session, case_id, cnic, statement, file_path, prot, conceal);
+}
+
+SystemResult<void> CaseFacade::updateWitnessProtection(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int witness_id, JusticeFlow::WitnessProtection st)
+{
+    return s1_->updateWitnessProtection(conn, session, witness_id, st);
+}
+
+SystemResult<std::vector<JusticeFlow::Witness>> CaseFacade::getWitnessesByCase(
+    PGconn *conn, int case_id)
+{
+    return s1_->getWitnessesByCase(conn, case_id);
+}
+
+SystemResult<int> CaseFacade::addAccused(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *cnic, JusticeFlow::InvolvementType inv)
+{
+    return s1_->addAccused(conn, session, case_id, cnic, inv);
+}
+
+SystemResult<void> CaseFacade::linkAccusedAssociation(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int accused_id, int associated_id, JusticeFlow::AssociationType atype)
+{
+    return s1_->linkAccusedAssociation(conn, session, accused_id, associated_id, atype);
+}
+
+SystemResult<std::vector<JusticeFlow::Accused>> CaseFacade::getAccusedByCase(
+    PGconn *conn, int case_id)
+{
+    return s1_->getAccusedByCase(conn, case_id);
+}
+
+SystemResult<void> CaseFacade::linkVehicleToCase(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, int vehicle_id, JusticeFlow::VehicleRole role, const char *notes)
+{
+    return s1_->linkVehicleToCase(conn, session, case_id, vehicle_id, role, notes);
+}
+
+SystemResult<std::vector<JusticeFlow::VehicleCase>> CaseFacade::getVehiclesByCase(
+    PGconn *conn, int case_id)
+{
+    return s1_->getVehiclesByCase(conn, case_id);
+}
+
+// =============================================================================
+// Section 6 — InvestigationFacade
+// =============================================================================
+
+SystemResult<std::unique_ptr<subsystem2::Case>> InvestigationFacade::registerFIR(
+    const subsystem2::FIRRegistrationRequest &request,
+    const JusticeFlow::SessionContext &session)
+{
+    return s2_->registerFIR(request, session);
+}
+
+SystemResult<std::unique_ptr<subsystem2::Evidence>> InvestigationFacade::logAndSecureEvidence(
+    int64_t case_id, JusticeFlow::EvidenceType type,
+    const std::string &desc, const std::string &file_path,
+    const JusticeFlow::SessionContext &session)
+{
+    return s2_->logAndSecureEvidence(case_id, type, desc, file_path, session);
+}
+
+SystemResult<std::unique_ptr<subsystem2::ChargeSheet>> InvestigationFacade::draftChargeSheet(
+    int64_t case_id, const JusticeFlow::SessionContext &session)
+{
+    return s2_->draftChargeSheet(case_id, session);
+}
+
+SystemResult<void> InvestigationFacade::submitChargeSheet(
+    subsystem2::ChargeSheet *sheet, const JusticeFlow::SessionContext &session)
+{
+    if (sheet == nullptr)
+    {
+        Logger::error("[System][InvestigationFacade] submitChargeSheet: null sheet pointer rejected.");
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
+    }
+    return s2_->submitChargeSheet(sheet, session);
+}
+
+SystemResult<std::unique_ptr<subsystem2::Case>> InvestigationFacade::fetchCase(int64_t case_id)
+{
+    return s2_->fetchCase(case_id);
+}
+
+// =============================================================================
+// Section 7 — PersonnelFacade
+// =============================================================================
+
+SystemResult<JusticeFlow::Officer> PersonnelFacade::getOfficerById(PGconn *conn, int id)
+{ return s1_->getOfficerById(conn, id); }
+
+SystemResult<JusticeFlow::Officer> PersonnelFacade::getOfficerByCnic(PGconn *conn, const char *cnic)
+{ return s1_->getOfficerByCnic(conn, cnic); }
+
+SystemResult<std::vector<JusticeFlow::Officer>> PersonnelFacade::getOfficersByStation(
+    PGconn *conn, int station_id)
+{ return s1_->getOfficersByStation(conn, station_id); }
+
+SystemResult<std::vector<JusticeFlow::Officer>> PersonnelFacade::getOfficersByStatus(
+    PGconn *conn, int station_id, JusticeFlow::OfficerStatus st)
+{ return s1_->getOfficersByStatus(conn, station_id, st); }
+
+SystemResult<void> PersonnelFacade::updateOfficerStatus(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int officer_id, JusticeFlow::OfficerStatus st)
+{ return s1_->updateOfficerStatus(conn, session, officer_id, st); }
+
+SystemResult<int> PersonnelFacade::promoteOfficer(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int officer_id, JusticeFlow::OfficerRank rank,
+    const char *belt, const char *type,
+    const char *effective, const char *order_date)
+{ return s1_->promoteOfficer(conn, session, officer_id, rank, belt, type, effective, order_date); }
+
+SystemResult<std::vector<JusticeFlow::OfficerRankHistory>> PersonnelFacade::getOfficerRankHistory(
+    PGconn *conn, int officer_id)
+{ return s1_->getOfficerRankHistory(conn, officer_id); }
+
+SystemResult<int> PersonnelFacade::deployOfficer(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int officer_id, int to_station,
+    const char *reason, const char *order_no,
+    const char *from_date, const char *until_date)
+{ return s1_->deployOfficer(conn, session, officer_id, to_station, reason, order_no, from_date, until_date); }
+
+SystemResult<void> PersonnelFacade::endDeployment(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int deployment_id)
+{ return s1_->endDeployment(conn, session, deployment_id); }
+
+SystemResult<std::vector<JusticeFlow::OfficerDeployment>> PersonnelFacade::getOfficerDeployments(
+    PGconn *conn, int officer_id, bool active_only)
+{ return s1_->getOfficerDeployments(conn, officer_id, active_only); }
+
+SystemResult<std::string> PersonnelFacade::generateOfficerReport(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int officer_id, subsystem1::ReportType type)
+{ return s1_->generateOfficerReport(conn, session, officer_id, type); }
+
+// =============================================================================
+// Section 8 — DutyFacade
+// =============================================================================
+
+SystemResult<int> DutyFacade::scheduleDuty(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int officer_id, int station_id, int patrol_route_id,
+    JusticeFlow::ShiftType st, const char *duty_date,
+    time_t start, time_t end)
+{ return s1_->scheduleDuty(conn, session, officer_id, station_id, patrol_route_id, st, duty_date, start, end); }
+
+SystemResult<void> DutyFacade::markDutyStart(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id)
+{ return s1_->markDutyStart(conn, session, duty_id); }
+
+SystemResult<void> DutyFacade::markDutyEnd(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id)
+{ return s1_->markDutyEnd(conn, session, duty_id); }
+
+SystemResult<void> DutyFacade::updateDutyStatus(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int duty_id, JusticeFlow::DutyStatus st, const char *reason)
+{ return s1_->updateDutyStatus(conn, session, duty_id, st, reason); }
+
+SystemResult<void> DutyFacade::cancelDuty(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id)
+{ return s1_->cancelDuty(conn, session, duty_id); }
+
+SystemResult<std::vector<JusticeFlow::DutyRoster>> DutyFacade::getDutyRoster(
+    PGconn *conn, int station_id, const char *duty_date)
+{ return s1_->getDutyRoster(conn, station_id, duty_date); }
+
+SystemResult<std::vector<JusticeFlow::DutyRoster>> DutyFacade::getActiveDuties(
+    PGconn *conn, int station_id)
+{ return s1_->getActiveDuties(conn, station_id); }
+
+SystemResult<std::vector<JusticeFlow::DutyRoster>> DutyFacade::getOfficerDutyHistory(
+    PGconn *conn, int officer_id, time_t from, time_t to)
+{ return s1_->getOfficerDutyHistory(conn, officer_id, from, to); }
+
+SystemResult<int> DutyFacade::createPatrolRoute(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int station_id, const char *beat_code, const char *name, const char *area)
+{ return s1_->createPatrolRoute(conn, session, station_id, beat_code, name, area); }
+
+SystemResult<void> DutyFacade::deactivatePatrolRoute(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int route_id)
+{ return s1_->deactivatePatrolRoute(conn, session, route_id); }
+
+SystemResult<std::vector<JusticeFlow::PatrolRoute>> DutyFacade::getPatrolRoutesByStation(
+    PGconn *conn, int station_id)
+{ return s1_->getPatrolRoutesByStation(conn, station_id); }
+
+// =============================================================================
+// Section 9 — EnforcementFacade
+// =============================================================================
+
+SystemResult<int> EnforcementFacade::requestWarrant(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *accused_cnic, JusticeFlow::WarrantType wt,
+    const char *magistrate, const char *court,
+    const char *valid_until, const char *target_address)
+{ return s3_->requestWarrant(conn, session, case_id, accused_cnic, wt, magistrate, court, valid_until, target_address); }
+
+SystemResult<void> EnforcementFacade::executeWarrant(
+    PGconn *conn, const JusticeFlow::SessionContext &session, int warrant_id)
+{ return s3_->executeWarrant(conn, session, warrant_id); }
+
+SystemResult<void> EnforcementFacade::cancelWarrant(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int warrant_id, const char *reason)
+{ return s3_->cancelWarrant(conn, session, warrant_id, reason); }
+
+SystemResult<std::vector<enforcement::WarrantRecord>> EnforcementFacade::getWarrantsByCase(
+    PGconn *conn, int case_id)
+{ return s3_->getWarrantsByCase(conn, case_id); }
+
+SystemResult<std::vector<enforcement::WarrantRecord>> EnforcementFacade::getActiveWarrants(
+    PGconn *conn, int station_id)
+{ return s3_->getActiveWarrants(conn, station_id); }
+
+SystemResult<int> EnforcementFacade::recordArrest(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int case_id, const char *cnic, const char *location, int warrant_id)
+{ return s3_->recordArrest(conn, session, case_id, cnic, location, warrant_id); }
+
+SystemResult<void> EnforcementFacade::updateCustodyStatus(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int arrest_id, JusticeFlow::CustodyStatus st, const char *reason)
+{ return s3_->updateCustodyStatus(conn, session, arrest_id, st, reason); }
+
+SystemResult<void> EnforcementFacade::markArrestAsDisputed(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int arrest_id, const char *reason)
+{ return s3_->markArrestAsDisputed(conn, session, arrest_id, reason); }
+
+SystemResult<std::vector<enforcement::ArrestRecord>> EnforcementFacade::getArrestsByCase(
+    PGconn *conn, int case_id)
+{ return s3_->getArrestsByCase(conn, case_id); }
+
+SystemResult<int> EnforcementFacade::recordBail(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int arrest_id, JusticeFlow::BailType bt, uint64_t amount,
+    const char *court, const char *magistrate, const char *valid_until,
+    const char *surety_name, const char *surety_cnic, const char *surety_contact)
+{ return s3_->recordBail(conn, session, arrest_id, bt, amount, court, magistrate, valid_until, surety_name, surety_cnic, surety_contact); }
+
+SystemResult<void> EnforcementFacade::revokeBail(
+    PGconn *conn, const JusticeFlow::SessionContext &session,
+    int bail_id, const char *reason)
+{ return s3_->revokeBail(conn, session, bail_id, reason); }
+
+SystemResult<enforcement::BailRecord> EnforcementFacade::getBailByArrest(
+    PGconn *conn, int arrest_id)
+{ return s3_->getBailByArrest(conn, arrest_id); }
+
+// =============================================================================
+// Section 10 — AuditFacade
+// =============================================================================
+
+SystemResult<std::vector<audit::AuditRecord>> AuditFacade::getAuditChangeHistory(int case_id)
+{ return s3_->getAuditChangeHistory(case_id); }
+
+SystemResult<std::vector<audit::AuditRecord>> AuditFacade::getAuditOfficerActions(
+    int officer_id, time_t from, time_t to)
+{ return s3_->getAuditOfficerActions(officer_id, from, to); }
+
+SystemResult<std::vector<audit::AuditRecord>> AuditFacade::getAuditTableChanges(
+    const char *table_name, int record_id)
+{ return s3_->getAuditTableChanges(table_name, record_id); }
+
+SystemResult<std::vector<audit::AuditRecord>> AuditFacade::auditQueryByTimeWindow(
+    time_t from, time_t to)
+{ return s3_->auditQueryByTimeWindow(from, to); }
+
+SystemResult<std::vector<audit::AuditRecord>> AuditFacade::detectSuspiciousActivity(
+    int station_id)
+{ return s3_->detectSuspiciousActivity(station_id); }
+
+// =============================================================================
+// Section 11 — ForensicFacade
+// =============================================================================
+
+SystemResult<int> ForensicFacade::createForensicRequest(
+    const char *token, int case_id,
+    const char *purpose, const char *purpose_desc,
+    const char *lab_name, const char *examiner_name)
+{ return s3_->createForensicRequest(token, case_id, purpose, purpose_desc, lab_name, examiner_name); }
+
+SystemResult<void> ForensicFacade::linkEvidence(
+    const char *token, int request_id, int evidence_id, const char *notes)
+{ return s3_->linkEvidence(token, request_id, evidence_id, notes); }
+
+SystemResult<void> ForensicFacade::recordLabReceipt(
+    const char *token, int request_id, const char *received_date)
+{ return s3_->recordLabReceipt(token, request_id, received_date); }
+
+SystemResult<void> ForensicFacade::recordExaminationStart(const char *token, int request_id)
+{ return s3_->recordExaminationStart(token, request_id); }
+
+SystemResult<void> ForensicFacade::recordFindings(
+    const char *token, int request_id,
+    const char *findings, const char *report_file_path, const char *delivery_date)
+{ return s3_->recordFindings(token, request_id, findings, report_file_path, delivery_date); }
+
+SystemResult<void> ForensicFacade::recordAmendment(
+    const char *token, int request_id, const char *amended_findings)
+{ return s3_->recordAmendment(token, request_id, amended_findings); }
+
+SystemResult<void> ForensicFacade::contestReport(
+    const char *token, int request_id, const char *reason)
+{ return s3_->contestReport(token, request_id, reason); }
+
+SystemResult<std::vector<forensic::ForensicRecord>> ForensicFacade::getForensicRequestsByCase(
+    const char *token, int case_id)
+{ return s3_->getForensicRequestsByCase(token, case_id); }
+
+SystemResult<std::vector<forensic::ForensicRecord>> ForensicFacade::getPendingForensicRequests(
+    const char *token, int station_id)
+{ return s3_->getPendingForensicRequests(token, station_id); }
+
+SystemResult<std::vector<forensic::EvidenceRef>> ForensicFacade::getEvidenceByForensicRequest(
+    const char *token, int request_id)
+{ return s3_->getEvidenceByForensicRequest(token, request_id); }
 
 } // namespace system_layer

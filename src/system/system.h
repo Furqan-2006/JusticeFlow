@@ -5,78 +5,75 @@
  * @brief Top-level System Gateway for the JusticeFlow platform.
  *
  * This is the ONLY header the API gateway / routing layer should include.
- * It unifies all three subsystems and the auth layer behind a single,
- * coherent entry point.
  *
  * ============================================================================
  * Design Patterns
  * ============================================================================
  *
- *  1. FACADE
- *       SystemManager presents one clean surface over four independent
- *       subsystems (Auth, S1, S2, S3) that otherwise expose different calling
- *       conventions (static methods, singletons, token-auth vs session-auth,
- *       heap-allocated entity returns vs out-params, etc.).
+ *  1. FACADE (split — Fix #1: not a God Object)
+ *       SystemManager owns eight narrow sub-facades, each responsible for
+ *       one domain.  The gateway accesses them via typed references:
  *
- *  2. ADAPTER
- *       Each subsystem is wrapped in a pure-virtual adapter interface
- *       (IAuthAdapter, ISubsystem1Adapter, ISubsystem2Adapter,
- *       ISubsystem3Adapter).  The adapters bridge the structural mismatch:
- *         - S1  : all-static, PGconn* + SessionContext on every call.
- *         - S2  : singleton, entity-returning (heap-allocated, caller owns),
- *                 object-oriented models.
- *         - S3  : mixed — static enforcement managers, a singleton AuditManager
- *                 with its own lifecycle, token-authenticated ForensicManager.
- *         - Auth: singleton with isDutyActive() cache and token lifecycle.
- *       Concrete default adapters (DefaultXxxAdapter) live in system.cpp and
- *       delegate straight through to the real subsystem code.
+ *         sys.auth()          — login, token validation, rank checks
+ *         sys.cases()         — S1 case CRUD, parties, status transitions
+ *         sys.investigation() — S2 FIR, evidence (mmap), charge sheets
+ *         sys.personnel()     — S1 officer profiles, rank, deployments
+ *         sys.duty()          — S1 duty scheduling and patrol routes
+ *         sys.enforcement()   — S3 warrants, arrests, bail
+ *         sys.audit()         — S3 audit trail and compliance queries
+ *         sys.forensic()      — S3 forensic lab workflow
  *
- *  3. DEPENDENCY INJECTION
- *       SystemManager holds each adapter via std::unique_ptr.
- *       Call injectXxx() *before* init() to replace any adapter with a mock,
- *       stub, or alternative implementation (e.g. for unit testing or
- *       gradual migration of a subsystem).
+ *  2. ADAPTER (Fix #2: canonical SystemResult<T> bridges subsystem differences)
+ *       Four pure-virtual adapter interfaces bridge structural mismatches.
+ *       Default concrete adapters live in system.cpp.
  *
- *  4. MANAGER
- *       SystemManager owns the system lifecycle:
- *         - init()     : initialises all adapters; boots the S3 audit connection.
- *         - shutdown() : tears down resources in reverse-init order.
- *       It also guards every public call with an initialisation check so that
- *       the gateway can never accidentally reach an uninitialised subsystem.
+ *  3. DEPENDENCY INJECTION (Fix #7: injection guarded against post-init misuse)
+ *       injectXxx() throws std::logic_error if called after init().
+ *
+ *  4. MANAGER (Fix #4: staged, explicit init order)
+ *       init() runs four named stages in dependency order.
+ *       std::atomic<bool> guards every facade call (Fix #5: thread safety).
  *
  * ============================================================================
- * Usage Pattern (API Gateway / Worker Thread)
+ * Unified Return Type — SystemResult<T>  (Fix #6: no more split-brain API)
  * ============================================================================
  *
- * @code
- * // ── process startup ──────────────────────────────────────────────────────
- * auto& sys = system_layer::SystemManager::getInstance();
+ *  ALL public methods return SystemResult<T>.
+ *  No more mixed bool / out-param / ResultCode semantics.
  *
- * // (optional) inject mocks / alternative adapters before init
- * // sys.injectS2(std::make_unique<MyS2Stub>());
+ * ============================================================================
+ * Memory Ownership — S2 Entities  (Fix #3: no raw pointer leakage)
+ * ============================================================================
  *
- * JusticeFlow::ResultCode rc = sys.init("host=localhost dbname=audit_db");
- * if (rc != JusticeFlow::ResultCode::OK) { /* handle */
-}
-** // ── per-request ──────────────────────────────────────────────────────────
- *JusticeFlow::SessionContext session;
-*rc = sys.validateToken(token, session);
-*if (rc != JusticeFlow::ResultCode::OK){/* reject */} *
-    *int case_id = 0;
-*JusticeFlow::ResultCode op_code;
-*bool ok = sys.registerCase(conn, session, ..., case_id, op_code);
-** // ── process shutdown ─────────────────────────────────────────────────────
- *sys.shutdown();
-*@endcode
-        *
-            *@author JusticeFlow Platform Team
-                * /
+ *  S2 adapters return std::unique_ptr<> instead of raw pointers.
+ *  SystemResult<std::unique_ptr<T>> transfers ownership unambiguously.
+ *
+ * ============================================================================
+ * Thread-Safety Contract  (Fix #5)
+ * ============================================================================
+ *
+ *  - init() and shutdown() MUST be called from the main thread, before
+ *    any worker thread is spawned / after all worker threads have joined.
+ *  - Sub-facade method calls ARE safe to issue concurrently from multiple
+ *    worker threads, provided the underlying adapters are stateless.
+ *    The default concrete adapters satisfy this — they delegate to
+ *    stateless static managers or singletons whose internal locking is
+ *    the respective subsystem's responsibility.
+ *  - Adapter injection (injectXxx) is NOT thread-safe; must complete on
+ *    the main thread before init().
+ *  - PGconn* handles must NOT be shared across threads. Each worker
+ *    supplies its own connection from its own pool slot.
+ *
+ * @author  JusticeFlow Platform Team
+ */
 
 #include <memory>
 #include <vector>
 #include <string>
 #include <ctime>
 #include <cstdint>
+#include <atomic>
+#include <stdexcept>
 
 #include <postgresql/libpq-fe.h>
 
@@ -89,477 +86,391 @@
 #include "subsystem3/subsystem3.h"
 #include "shr_infra/auth/include/auth_module.h"
 
-// ── S2 domain types (needed for UC return types) ──────────────────────────
+// ── S2 domain models (returned via unique_ptr) ────────────────────────────
 #include "subsystem2/include/models/Case.h"
 #include "subsystem2/include/models/Evidence.h"
 #include "subsystem2/include/models/ChargeSheet.h"
 #include "subsystem2/include/s2_types.h"
 
-    namespace system_layer
+namespace system_layer
 {
 
     // =============================================================================
-    // IAuthAdapter — Adapter interface for the Auth & Session subsystem
+    // Fix #6 — SystemResult<T>: unified return type
     // =============================================================================
 
     /**
-     * @interface IAuthAdapter
-     * @brief Abstract adapter bridging SystemManager to the auth::AuthManager singleton.
+     * @brief Single return type for all SystemManager / sub-facade methods.
      *
-     * Dependency-inject a concrete implementation (or mock) via
-     * SystemManager::injectAuth() before calling init().
+     * Replaces the patchwork of:
+     *   - bool return + ResultCode& out-param   (S1, S3 write ops)
+     *   - ResultCode return + T& out-param      (S1, S3 read ops)
+     *   - ResultCode return + T*& raw-pointer   (S2)
+     *
+     * Usage:
+     * @code
+     *   auto r = sys.auth().login("12345-6789012-3", "s3cr3t");
+     *   if (!r.ok()) { handle(r.code); return; }
+     *   std::string token = std::move(r.value);
+     * @endcode
+     */
+    template <typename T>
+    struct SystemResult
+    {
+        JusticeFlow::ResultCode code = JusticeFlow::ResultCode::OK;
+        T value = {};
+
+        bool ok() const noexcept { return code == JusticeFlow::ResultCode::OK; }
+
+        static SystemResult<T> success(T val)
+        {
+            return {JusticeFlow::ResultCode::OK, std::move(val)};
+        }
+
+        static SystemResult<T> failure(JusticeFlow::ResultCode rc)
+        {
+            return {rc, {}};
+        }
+    };
+
+    /** Specialisation for operations that produce no value. */
+    template <>
+    struct SystemResult<void>
+    {
+        JusticeFlow::ResultCode code = JusticeFlow::ResultCode::OK;
+
+        bool ok() const noexcept { return code == JusticeFlow::ResultCode::OK; }
+
+        static SystemResult<void> success() { return {JusticeFlow::ResultCode::OK}; }
+        static SystemResult<void> failure(JusticeFlow::ResultCode rc) { return {rc}; }
+    };
+
+    // =============================================================================
+    // Fix #4 — SystemInitConfig: explicit dependency graph, not tribal knowledge
+    // =============================================================================
+
+    /**
+     * @brief All parameters required by SystemManager::init().
+     *
+     * Naming each parameter in a struct makes staged dependencies visible
+     * at the call site and trivial to extend without breaking callers.
+     */
+    struct SystemInitConfig
+    {
+        /** libpq connection string for the dedicated read-only audit DB (S3 only). */
+        const char *audit_db_conninfo = nullptr;
+
+        // Future slots: per-subsystem pool sizes, timeouts, feature flags.
+    };
+
+    // =============================================================================
+    // Adapter Interfaces
+    // =============================================================================
+
+    // -----------------------------------------------------------------------------
+    // IAuthAdapter
+    // -----------------------------------------------------------------------------
+
+    /**
+     * @interface IAuthAdapter
+     * @brief Bridges SystemManager to auth::AuthManager (singleton).
      */
     class IAuthAdapter
     {
     public:
         virtual ~IAuthAdapter() = default;
 
-        /** Authenticate an officer by credentials; returns a session token on OK. */
-        virtual JusticeFlow::ResultCode login(
-            const char *cnic,
-            const char *password,
-            std::string &out_token) = 0;
-
-        /**
-         * Validate a session token on every inbound request.
-         * Populates out_session with officer identity and rank if valid.
-         */
-        virtual JusticeFlow::ResultCode validateToken(
-            const char *token,
-            JusticeFlow::SessionContext &out_session) = 0;
-
-        /**
-         * Check whether the caller's rank meets the minimum required rank.
-         * Called by subsystem facades internally, but exposed here for gateway
-         * pre-flight checks.
-         */
-        virtual JusticeFlow::ResultCode validateRank(
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::OfficerRank required_rank) = 0;
-
-        /** Returns true if the officer currently has an active duty assignment. */
+        virtual SystemResult<std::string> login(const char *cnic,
+                                                const char *password) = 0;
+        virtual SystemResult<JusticeFlow::SessionContext> validateToken(const char *token) = 0;
+        virtual SystemResult<void> validateRank(const JusticeFlow::SessionContext &s,
+                                                JusticeFlow::OfficerRank required) = 0;
+        /** Returns cached duty status; never throws. */
         virtual bool isDutyActive(int officer_id) = 0;
-
-        /** Extend the idle-timeout window for an active session. */
-        virtual JusticeFlow::ResultCode refreshSession(const char *token) = 0;
-
-        /** Destroy the session, invalidating the token immediately. */
-        virtual JusticeFlow::ResultCode logout(const char *token) = 0;
+        virtual SystemResult<void> refreshSession(const char *token) = 0;
+        virtual SystemResult<void> logout(const char *token) = 0;
     };
 
-    // =============================================================================
-    // ISubsystem1Adapter — Adapter interface for S1 (Crime Intelligence & Resources)
-    // =============================================================================
+    // -----------------------------------------------------------------------------
+    // ISubsystem1Adapter — wraps all-static Subsystem1 (Fix #2: uniform return type)
+    // -----------------------------------------------------------------------------
 
-    /**
-     * @interface ISubsystem1Adapter
-     * @brief Abstract adapter over the all-static Subsystem1 facade.
-     *
-     * Bridges the gap between SystemManager's instance-based dispatch and S1's
-     * purely static calling convention.  Every method mirrors the corresponding
-     * Subsystem1 static exactly.
-     */
     class ISubsystem1Adapter
     {
     public:
         virtual ~ISubsystem1Adapter() = default;
 
-        // ── Case Management — Core CRUD ──────────────────────────────────────────
+        // ── Case CRUD ─────────────────────────────────────────────────────────────
 
-        virtual bool registerCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::CaseType case_type,
-            time_t incident_date,
-            const char *incident_address,
-            const char *description,
-            double lat, double lon,
-            int station_id,
-            const char *complainant_cnic,
-            int &out_case_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        /** @return out_case_id on success. */
+        virtual SystemResult<int> registerCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            JusticeFlow::CaseType case_type, time_t incident_date,
+            const char *incident_address, const char *description,
+            double lat, double lon, int station_id,
+            const char *complainant_cnic) = 0;
 
-        virtual JusticeFlow::ResultCode getCaseById(
-            PGconn *conn, int case_id,
-            JusticeFlow::Case &out) = 0;
+        virtual SystemResult<JusticeFlow::Case> getCaseById(
+            PGconn *conn, int case_id) = 0;
 
-        virtual JusticeFlow::ResultCode getCasesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Case> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(
+            PGconn *conn, int station_id) = 0;
 
-        virtual JusticeFlow::ResultCode getCasesByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::CaseStatus status,
-            std::vector<JusticeFlow::Case> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(
+            PGconn *conn, int station_id, JusticeFlow::CaseStatus) = 0;
 
-        // ── Case Management — Status Transitions ─────────────────────────────────
+        // ── Status Transitions ────────────────────────────────────────────────────
 
-        virtual bool updateCaseStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            JusticeFlow::CaseStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> updateCaseStatus(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, JusticeFlow::CaseStatus, const char *reason) = 0;
 
-        virtual bool closeCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *closure_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> closeCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *reason) = 0;
 
-        virtual bool reopenCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *reopen_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> reopenCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *reason) = 0;
 
-        virtual bool transferCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            int to_station_id,
-            const char *transfer_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> transferCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, int to_station_id, const char *reason) = 0;
 
-        virtual JusticeFlow::ResultCode getCaseStatusLog(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseStatusLog> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(
+            PGconn *conn, int case_id) = 0;
 
-        // ── Case Management — Officer Assignment ──────────────────────────────────
+        // ── Officer Assignment ────────────────────────────────────────────────────
 
-        virtual bool assignOfficerToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::CaseOfficerRole role,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> assignOfficerToCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, int officer_id, JusticeFlow::CaseOfficerRole) = 0;
 
-        virtual bool relieveOfficerFromCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> relieveOfficerFromCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, int officer_id) = 0;
 
-        virtual JusticeFlow::ResultCode getAssignedOfficers(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseOfficer> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(
+            PGconn *conn, int case_id) = 0;
 
-        // ── Case Management — Parties ─────────────────────────────────────────────
+        // ── Complainants ──────────────────────────────────────────────────────────
 
-        virtual bool addComplainant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *person_cnic,
-            JusticeFlow::RelationshipToVictim relation,
-            bool notify_on_update,
-            int &out_complainant_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        /** @return out_complainant_id on success. */
+        virtual SystemResult<int> addComplainant(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *person_cnic,
+            JusticeFlow::RelationshipToVictim, bool notify_on_update) = 0;
 
-        virtual bool updateComplainantStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int complainant_id,
-            JusticeFlow::ComplainantStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> updateComplainantStatus(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int complainant_id, JusticeFlow::ComplainantStatus,
+            const char *reason) = 0;
 
-        virtual JusticeFlow::ResultCode getComplainantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Complainant> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(
+            PGconn *conn, int case_id) = 0;
 
-        virtual bool addVictim(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *person_cnic,
-            const char *injury_type,
-            JusticeFlow::InjurySeverity injury_severity,
-            JusticeFlow::VulnerabilityCategory vulnerability,
-            const char *medical_report_ref,
-            int &out_victim_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        // ── Victims ───────────────────────────────────────────────────────────────
 
-        virtual JusticeFlow::ResultCode getVictimsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Victim> &out) = 0;
+        /** @return out_victim_id on success. */
+        virtual SystemResult<int> addVictim(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *person_cnic,
+            const char *injury_type, JusticeFlow::InjurySeverity,
+            JusticeFlow::VulnerabilityCategory,
+            const char *medical_report_ref) = 0;
 
-        virtual bool addWitness(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *person_cnic,
-            const char *statement_text,
-            const char *statement_file_path,
-            JusticeFlow::WitnessProtection protection_status,
-            bool conceal_identity,
-            int &out_witness_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(
+            PGconn *conn, int case_id) = 0;
 
-        virtual bool updateWitnessProtection(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int witness_id,
-            JusticeFlow::WitnessProtection new_status,
-            JusticeFlow::ResultCode &out_code) = 0;
+        // ── Witnesses ─────────────────────────────────────────────────────────────
 
-        virtual JusticeFlow::ResultCode getWitnessesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Witness> &out) = 0;
+        /** @return out_witness_id on success. */
+        virtual SystemResult<int> addWitness(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *person_cnic,
+            const char *statement_text, const char *statement_file_path,
+            JusticeFlow::WitnessProtection, bool conceal_identity) = 0;
 
-        virtual bool addAccused(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *person_cnic,
-            JusticeFlow::InvolvementType involvement,
-            int &out_accused_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> updateWitnessProtection(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int witness_id, JusticeFlow::WitnessProtection) = 0;
 
-        virtual bool linkAccusedAssociation(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int accused_id,
-            int associated_accused_id,
-            JusticeFlow::AssociationType association_type,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(
+            PGconn *conn, int case_id) = 0;
 
-        virtual JusticeFlow::ResultCode getAccusedByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Accused> &out) = 0;
+        // ── Accused ───────────────────────────────────────────────────────────────
 
-        virtual bool linkVehicleToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
+        /** @return out_accused_id on success. */
+        virtual SystemResult<int> addAccused(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *person_cnic,
+            JusticeFlow::InvolvementType) = 0;
+
+        virtual SystemResult<void> linkAccusedAssociation(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int accused_id, int associated_accused_id,
+            JusticeFlow::AssociationType) = 0;
+
+        virtual SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(
+            PGconn *conn, int case_id) = 0;
+
+        // ── Vehicles ──────────────────────────────────────────────────────────────
+
+        virtual SystemResult<void> linkVehicleToCase(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
             int case_id, int vehicle_id,
-            JusticeFlow::VehicleRole role,
-            const char *condition_notes,
-            JusticeFlow::ResultCode &out_code) = 0;
+            JusticeFlow::VehicleRole, const char *condition_notes) = 0;
 
-        virtual JusticeFlow::ResultCode getVehiclesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::VehicleCase> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(
+            PGconn *conn, int case_id) = 0;
 
-        // ── Duty & Patrol — Scheduling ────────────────────────────────────────────
+        // ── Duty Scheduling ───────────────────────────────────────────────────────
 
-        virtual bool scheduleDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
+        /** @return out_duty_id on success. */
+        virtual SystemResult<int> scheduleDuty(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
             int officer_id, int station_id, int patrol_route_id,
-            JusticeFlow::ShiftType shift_type,
-            const char *duty_date,
-            time_t scheduled_start, time_t scheduled_end,
-            int &out_duty_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+            JusticeFlow::ShiftType, const char *duty_date,
+            time_t scheduled_start, time_t scheduled_end) = 0;
 
-        virtual bool markDutyStart(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> markDutyStart(
+            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) = 0;
 
-        virtual bool markDutyEnd(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> markDutyEnd(
+            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) = 0;
 
-        virtual bool updateDutyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::DutyStatus new_status,
-            const char *absence_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> updateDutyStatus(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int duty_id, JusticeFlow::DutyStatus, const char *absence_reason) = 0;
 
-        virtual bool cancelDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> cancelDuty(
+            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) = 0;
 
-        // ── Duty & Patrol — Queries ───────────────────────────────────────────────
+        virtual SystemResult<std::vector<JusticeFlow::DutyRoster>> getDutyRoster(
+            PGconn *conn, int station_id, const char *duty_date) = 0;
 
-        virtual JusticeFlow::ResultCode getDutyRoster(
-            PGconn *conn, int station_id,
-            const char *duty_date,
-            std::vector<JusticeFlow::DutyRoster> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::DutyRoster>> getActiveDuties(
+            PGconn *conn, int station_id) = 0;
 
-        virtual JusticeFlow::ResultCode getActiveDuties(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::DutyRoster> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::DutyRoster>> getOfficerDutyHistory(
+            PGconn *conn, int officer_id, time_t from, time_t to) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficerDutyHistory(
-            PGconn *conn, int officer_id,
-            time_t from, time_t to,
-            std::vector<JusticeFlow::DutyRoster> &out) = 0;
+        // ── Patrol Routes ─────────────────────────────────────────────────────────
 
-        // ── Duty & Patrol — Routes ────────────────────────────────────────────────
+        /** @return out_route_id on success. */
+        virtual SystemResult<int> createPatrolRoute(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int station_id, const char *beat_code,
+            const char *route_name, const char *area_description) = 0;
 
-        virtual bool createPatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int station_id,
-            const char *beat_code,
-            const char *route_name,
-            const char *area_description,
-            int &out_route_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> deactivatePatrolRoute(
+            PGconn *conn, const JusticeFlow::SessionContext &session, int route_id) = 0;
 
-        virtual bool deactivatePatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int route_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::PatrolRoute>> getPatrolRoutesByStation(
+            PGconn *conn, int station_id) = 0;
 
-        virtual JusticeFlow::ResultCode getPatrolRoutesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::PatrolRoute> &out) = 0;
+        // ── Personnel ─────────────────────────────────────────────────────────────
 
-        // ── Personnel — Profiles ──────────────────────────────────────────────────
+        virtual SystemResult<JusticeFlow::Officer> getOfficerById(
+            PGconn *conn, int officer_id) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficerById(
-            PGconn *conn, int officer_id,
-            JusticeFlow::Officer &out) = 0;
+        virtual SystemResult<JusticeFlow::Officer> getOfficerByCnic(
+            PGconn *conn, const char *cnic) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficerByCnic(
-            PGconn *conn, const char *cnic,
-            JusticeFlow::Officer &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStation(
+            PGconn *conn, int station_id) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficersByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Officer> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStatus(
+            PGconn *conn, int station_id, JusticeFlow::OfficerStatus) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficersByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::OfficerStatus status,
-            std::vector<JusticeFlow::Officer> &out) = 0;
+        virtual SystemResult<void> updateOfficerStatus(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int officer_id, JusticeFlow::OfficerStatus) = 0;
 
-        // ── Personnel — Status & Rank ─────────────────────────────────────────────
+        /** @return out_history_id on success. */
+        virtual SystemResult<int> promoteOfficer(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int officer_id, JusticeFlow::OfficerRank,
+            const char *new_belt_number, const char *promotion_type,
+            const char *effective_date, const char *order_date) = 0;
 
-        virtual bool updateOfficerStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerStatus new_status,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::OfficerRankHistory>> getOfficerRankHistory(
+            PGconn *conn, int officer_id) = 0;
 
-        virtual bool promoteOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerRank new_rank,
-            const char *new_belt_number,
-            const char *promotion_type,
-            const char *effective_date,
-            const char *order_date,
-            int &out_history_id,
-            JusticeFlow::ResultCode &out_code) = 0;
-
-        virtual JusticeFlow::ResultCode getOfficerRankHistory(
-            PGconn *conn, int officer_id,
-            std::vector<JusticeFlow::OfficerRankHistory> &out) = 0;
-
-        // ── Personnel — Deployments ───────────────────────────────────────────────
-
-        virtual bool deployOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
+        /** @return out_deployment_id on success. */
+        virtual SystemResult<int> deployOfficer(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
             int officer_id, int to_station_id,
-            const char *deployment_reason,
-            const char *order_number,
-            const char *deployed_from,
-            const char *deployed_until,
-            int &out_deployment_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+            const char *deployment_reason, const char *order_number,
+            const char *deployed_from, const char *deployed_until) = 0;
 
-        virtual bool endDeployment(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int deployment_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> endDeployment(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int deployment_id) = 0;
 
-        virtual JusticeFlow::ResultCode getOfficerDeployments(
-            PGconn *conn, int officer_id,
-            bool active_only,
-            std::vector<JusticeFlow::OfficerDeployment> &out) = 0;
+        virtual SystemResult<std::vector<JusticeFlow::OfficerDeployment>> getOfficerDeployments(
+            PGconn *conn, int officer_id, bool active_only) = 0;
 
-        virtual JusticeFlow::ResultCode generateOfficerReport(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            subsystem1::ReportType type,
-            std::string &out_report_text) = 0;
+        virtual SystemResult<std::string> generateOfficerReport(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int officer_id, subsystem1::ReportType) = 0;
     };
 
-    // =============================================================================
-    // ISubsystem2Adapter — Adapter interface for S2 (Investigation & Case Processing)
-    // =============================================================================
+    // -----------------------------------------------------------------------------
+    // ISubsystem2Adapter — Fix #3: raw pointers replaced with unique_ptr
+    // -----------------------------------------------------------------------------
 
     /**
      * @interface ISubsystem2Adapter
-     * @brief Abstract adapter over the Subsystem2 singleton facade.
+     * @brief Bridges SystemManager to the Subsystem2 singleton.
      *
-     * S2 returns heap-allocated entity pointers (caller takes ownership).
-     * The adapter preserves this contract so that the gateway layer can manage
-     * entity lifetimes through RAII wrappers if desired.
+     * All entity-creating operations return std::unique_ptr<T> inside
+     * SystemResult, transferring ownership unambiguously to the caller.
+     * submitChargeSheet is the single exception: it receives a non-owning
+     * raw pointer because the caller already owns the ChargeSheet
+     * unique_ptr and merely passes it by address for the duration of the call.
      */
     class ISubsystem2Adapter
     {
     public:
         virtual ~ISubsystem2Adapter() = default;
 
-        /** UC-1: Validate session, check officer rank, insert FIR. */
-        virtual JusticeFlow::ResultCode registerFIR(
+        /** UC-1  Caller takes ownership of returned Case entity. */
+        virtual SystemResult<std::unique_ptr<subsystem2::Case>> registerFIR(
             const subsystem2::FIRRegistrationRequest &request,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Case *&out_case) = 0;
+            const JusticeFlow::SessionContext &session) = 0;
 
-        /** UC-2: mmap evidence file, persist record, fire Observer chain. */
-        virtual JusticeFlow::ResultCode logAndSecureEvidence(
+        /** UC-2  Caller takes ownership of returned Evidence entity. */
+        virtual SystemResult<std::unique_ptr<subsystem2::Evidence>> logAndSecureEvidence(
             int64_t case_id,
             JusticeFlow::EvidenceType type,
             const std::string &description,
             const std::string &file_path,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Evidence *&out_evidence) = 0;
+            const JusticeFlow::SessionContext &session) = 0;
 
-        /** UC-3: Create a DRAFT charge sheet for the given case. */
-        virtual JusticeFlow::ResultCode draftChargeSheet(
+        /** UC-3  Caller takes ownership of returned ChargeSheet entity. */
+        virtual SystemResult<std::unique_ptr<subsystem2::ChargeSheet>> draftChargeSheet(
             int64_t case_id,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::ChargeSheet *&out_sheet) = 0;
+            const JusticeFlow::SessionContext &session) = 0;
 
-        /** UC-4: Validate, lock, and persist a charge sheet as SUBMITTED_TO_COURT. */
-        virtual JusticeFlow::ResultCode submitChargeSheet(
+        /**
+         * UC-4  Non-owning: sheet must remain alive for the duration of the call.
+         *       sheet must not be nullptr (validated by InvestigationFacade before
+         *       reaching the adapter).
+         */
+        virtual SystemResult<void> submitChargeSheet(
             subsystem2::ChargeSheet *sheet,
             const JusticeFlow::SessionContext &session) = 0;
 
-        /** UC-X: Retrieve a case record by primary key (read-only). */
-        virtual JusticeFlow::ResultCode fetchCase(
-            int64_t case_id,
-            subsystem2::Case *&out_case) = 0;
+        /** UC-X  Caller takes ownership of returned Case entity. */
+        virtual SystemResult<std::unique_ptr<subsystem2::Case>> fetchCase(
+            int64_t case_id) = 0;
     };
 
-    // =============================================================================
-    // ISubsystem3Adapter — Adapter interface for S3 (Security & Enforcement)
-    // =============================================================================
+    // -----------------------------------------------------------------------------
+    // ISubsystem3Adapter
+    // -----------------------------------------------------------------------------
 
-    /**
-     * @interface ISubsystem3Adapter
-     * @brief Abstract adapter over the Subsystem3 static facade.
-     *
-     * S3 has three calling conventions internally (AuditManager singleton with
-     * its own connection, enforcement static managers sharing the caller's
-     * PGconn*, ForensicManager using token-based auth).  The adapter presents
-     * a single uniform interface; concrete implementations hide these details.
-     *
-     * Note: The audit lifecycle (initAudit / shutdownAudit) is managed by
-     * SystemManager::init() / shutdown() rather than exposed here.
-     */
     class ISubsystem3Adapter
     {
     public:
@@ -567,199 +478,528 @@
 
         // ── Audit ─────────────────────────────────────────────────────────────────
 
-        virtual JusticeFlow::ResultCode getAuditChangeHistory(
-            int case_id,
-            std::vector<audit::AuditRecord> &out) = 0;
+        virtual SystemResult<std::vector<audit::AuditRecord>> getAuditChangeHistory(
+            int case_id) = 0;
 
-        virtual JusticeFlow::ResultCode getAuditOfficerActions(
-            int officer_id,
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out) = 0;
+        virtual SystemResult<std::vector<audit::AuditRecord>> getAuditOfficerActions(
+            int officer_id, time_t from, time_t to) = 0;
 
-        virtual JusticeFlow::ResultCode getAuditTableChanges(
-            const char *table_name,
-            int record_id,
-            std::vector<audit::AuditRecord> &out) = 0;
+        virtual SystemResult<std::vector<audit::AuditRecord>> getAuditTableChanges(
+            const char *table_name, int record_id) = 0;
 
-        virtual JusticeFlow::ResultCode auditQueryByTimeWindow(
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out) = 0;
+        virtual SystemResult<std::vector<audit::AuditRecord>> auditQueryByTimeWindow(
+            time_t from, time_t to) = 0;
 
-        virtual JusticeFlow::ResultCode detectSuspiciousActivity(
-            int station_id,
-            std::vector<audit::AuditRecord> &out) = 0;
+        virtual SystemResult<std::vector<audit::AuditRecord>> detectSuspiciousActivity(
+            int station_id) = 0;
 
-        // ── Enforcement — Warrants ────────────────────────────────────────────────
+        // ── Warrants ──────────────────────────────────────────────────────────────
 
-        virtual bool requestWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            JusticeFlow::WarrantType warrant_type,
-            const char *magistrate_name,
-            const char *issuing_court,
-            const char *valid_until,
-            const char *target_address,
-            int &out_warrant_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        /** @return out_warrant_id on success. */
+        virtual SystemResult<int> requestWarrant(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *accused_cnic,
+            JusticeFlow::WarrantType,
+            const char *magistrate_name, const char *issuing_court,
+            const char *valid_until, const char *target_address) = 0;
 
-        virtual bool executeWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> executeWarrant(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int warrant_id) = 0;
 
-        virtual bool cancelWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            const char *cancellation_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> cancelWarrant(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int warrant_id, const char *cancellation_reason) = 0;
 
-        virtual JusticeFlow::ResultCode getWarrantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::WarrantRecord> &out) = 0;
+        virtual SystemResult<std::vector<enforcement::WarrantRecord>> getWarrantsByCase(
+            PGconn *conn, int case_id) = 0;
 
-        virtual JusticeFlow::ResultCode getActiveWarrants(
-            PGconn *conn, int station_id,
-            std::vector<enforcement::WarrantRecord> &out) = 0;
+        virtual SystemResult<std::vector<enforcement::WarrantRecord>> getActiveWarrants(
+            PGconn *conn, int station_id) = 0;
 
-        // ── Enforcement — Arrests ─────────────────────────────────────────────────
+        // ── Arrests ───────────────────────────────────────────────────────────────
 
-        virtual bool recordArrest(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            const char *arrest_location,
-            int warrant_id,
-            int &out_arrest_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+        /** @return out_arrest_id on success. */
+        virtual SystemResult<int> recordArrest(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int case_id, const char *accused_cnic,
+            const char *arrest_location, int warrant_id) = 0;
 
-        virtual bool updateCustodyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::CustodyStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> updateCustodyStatus(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int arrest_id, JusticeFlow::CustodyStatus, const char *reason) = 0;
 
-        virtual bool markArrestAsDisputed(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            const char *dispute_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> markArrestAsDisputed(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int arrest_id, const char *dispute_reason) = 0;
 
-        virtual JusticeFlow::ResultCode getArrestsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::ArrestRecord> &out) = 0;
+        virtual SystemResult<std::vector<enforcement::ArrestRecord>> getArrestsByCase(
+            PGconn *conn, int case_id) = 0;
 
-        // ── Enforcement — Bail ────────────────────────────────────────────────────
+        // ── Bail ──────────────────────────────────────────────────────────────────
 
-        virtual bool recordBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::BailType bail_type,
+        /** @return out_bail_id on success. */
+        virtual SystemResult<int> recordBail(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int arrest_id, JusticeFlow::BailType,
             uint64_t bail_amount_paise,
-            const char *court_name,
-            const char *magistrate_name,
+            const char *court_name, const char *magistrate_name,
             const char *valid_until,
-            const char *surety_name,
-            const char *surety_cnic,
-            const char *surety_contact,
-            int &out_bail_id,
-            JusticeFlow::ResultCode &out_code) = 0;
+            const char *surety_name, const char *surety_cnic,
+            const char *surety_contact) = 0;
 
-        virtual bool revokeBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int bail_id,
-            const char *revocation_reason,
-            JusticeFlow::ResultCode &out_code) = 0;
+        virtual SystemResult<void> revokeBail(
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int bail_id, const char *revocation_reason) = 0;
 
-        virtual JusticeFlow::ResultCode getBailByArrest(
-            PGconn *conn, int arrest_id,
-            enforcement::BailRecord &out) = 0;
+        virtual SystemResult<enforcement::BailRecord> getBailByArrest(
+            PGconn *conn, int arrest_id) = 0;
 
         // ── Forensic & Lab ────────────────────────────────────────────────────────
 
-        virtual JusticeFlow::ResultCode createForensicRequest(
-            const char *token,
-            int case_id,
-            const char *examination_purpose,
-            const char *purpose_description,
-            const char *lab_name,
-            const char *examiner_name,
-            int &out_request_id) = 0;
+        /** @return out_request_id on success. */
+        virtual SystemResult<int> createForensicRequest(
+            const char *token, int case_id,
+            const char *examination_purpose, const char *purpose_description,
+            const char *lab_name, const char *examiner_name) = 0;
 
-        virtual JusticeFlow::ResultCode linkEvidence(
-            const char *token,
-            int request_id,
-            int evidence_id,
-            const char *notes) = 0;
+        virtual SystemResult<void> linkEvidence(
+            const char *token, int request_id,
+            int evidence_id, const char *notes) = 0;
 
-        virtual JusticeFlow::ResultCode recordLabReceipt(
-            const char *token,
-            int request_id,
+        virtual SystemResult<void> recordLabReceipt(
+            const char *token, int request_id,
             const char *received_date) = 0;
 
-        virtual JusticeFlow::ResultCode recordExaminationStart(
-            const char *token,
-            int request_id) = 0;
+        virtual SystemResult<void> recordExaminationStart(
+            const char *token, int request_id) = 0;
 
-        virtual JusticeFlow::ResultCode recordFindings(
-            const char *token,
-            int request_id,
-            const char *findings,
-            const char *report_file_path,
+        virtual SystemResult<void> recordFindings(
+            const char *token, int request_id,
+            const char *findings, const char *report_file_path,
             const char *delivery_date) = 0;
 
-        virtual JusticeFlow::ResultCode recordAmendment(
-            const char *token,
-            int request_id,
+        virtual SystemResult<void> recordAmendment(
+            const char *token, int request_id,
             const char *amended_findings) = 0;
 
-        virtual JusticeFlow::ResultCode contestReport(
-            const char *token,
-            int request_id,
+        virtual SystemResult<void> contestReport(
+            const char *token, int request_id,
             const char *contest_reason) = 0;
 
-        virtual JusticeFlow::ResultCode getForensicRequestsByCase(
-            const char *token, int case_id,
-            std::vector<forensic::ForensicRecord> &out) = 0;
+        virtual SystemResult<std::vector<forensic::ForensicRecord>> getForensicRequestsByCase(
+            const char *token, int case_id) = 0;
 
-        virtual JusticeFlow::ResultCode getPendingForensicRequests(
-            const char *token, int station_id,
-            std::vector<forensic::ForensicRecord> &out) = 0;
+        virtual SystemResult<std::vector<forensic::ForensicRecord>> getPendingForensicRequests(
+            const char *token, int station_id) = 0;
 
-        virtual JusticeFlow::ResultCode getEvidenceByForensicRequest(
-            const char *token, int request_id,
-            std::vector<forensic::EvidenceRef> &out) = 0;
+        virtual SystemResult<std::vector<forensic::EvidenceRef>> getEvidenceByForensicRequest(
+            const char *token, int request_id) = 0;
     };
 
     // =============================================================================
-    // SystemManager — Singleton Facade + Dependency Injection Manager
+    // Fix #1 — Sub-Facades: narrow, domain-scoped classes instead of one mega-class
+    // =============================================================================
+    // Each sub-facade holds a NON-OWNING pointer to its adapter.
+    // SystemManager owns the adapters via unique_ptr and wires the facades
+    // during init().  Facades are invalid (and must not be called) before init().
+    // =============================================================================
+
+    // -----------------------------------------------------------------------------
+    // AuthFacade
+    // -----------------------------------------------------------------------------
+
+    class AuthFacade
+    {
+    public:
+        explicit AuthFacade(IAuthAdapter *adapter = nullptr) noexcept
+            : adapter_(adapter) {}
+
+        SystemResult<std::string> login(const char *cnic, const char *password);
+        SystemResult<JusticeFlow::SessionContext> validateToken(const char *token);
+        SystemResult<void> validateRank(const JusticeFlow::SessionContext &s,
+                                        JusticeFlow::OfficerRank required);
+        bool isDutyActive(int officer_id);
+        SystemResult<void> refreshSession(const char *token);
+        SystemResult<void> logout(const char *token);
+
+        void setAdapter(IAuthAdapter *a) noexcept { adapter_ = a; }
+
+    private:
+        IAuthAdapter *adapter_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // CaseFacade — S1 case CRUD, status transitions, all party types, vehicles
+    // -----------------------------------------------------------------------------
+
+    class CaseFacade
+    {
+    public:
+        explicit CaseFacade(ISubsystem1Adapter *s1 = nullptr) noexcept : s1_(s1) {}
+
+        void setAdapter(ISubsystem1Adapter *a) noexcept { s1_ = a; }
+
+        // Core CRUD
+        SystemResult<int> registerCase(PGconn *, const JusticeFlow::SessionContext &,
+                                       JusticeFlow::CaseType, time_t,
+                                       const char *address, const char *desc,
+                                       double lat, double lon,
+                                       int station_id, const char *cnic);
+        SystemResult<JusticeFlow::Case> getCaseById(PGconn *, int case_id);
+        SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(PGconn *, int station_id);
+        SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(PGconn *, int station_id,
+                                                                      JusticeFlow::CaseStatus);
+        // Status transitions
+        SystemResult<void> updateCaseStatus(PGconn *, const JusticeFlow::SessionContext &,
+                                            int case_id, JusticeFlow::CaseStatus, const char *reason);
+        SystemResult<void> closeCase(PGconn *, const JusticeFlow::SessionContext &,
+                                     int case_id, const char *reason);
+        SystemResult<void> reopenCase(PGconn *, const JusticeFlow::SessionContext &,
+                                      int case_id, const char *reason);
+        SystemResult<void> transferCase(PGconn *, const JusticeFlow::SessionContext &,
+                                        int case_id, int to_station_id, const char *reason);
+        SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(PGconn *, int case_id);
+
+        // Officer assignment
+        SystemResult<void> assignOfficerToCase(PGconn *, const JusticeFlow::SessionContext &,
+                                               int case_id, int officer_id, JusticeFlow::CaseOfficerRole);
+        SystemResult<void> relieveOfficerFromCase(PGconn *, const JusticeFlow::SessionContext &,
+                                                  int case_id, int officer_id);
+        SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(PGconn *, int case_id);
+
+        // Complainants
+        SystemResult<int> addComplainant(PGconn *, const JusticeFlow::SessionContext &,
+                                         int case_id, const char *cnic,
+                                         JusticeFlow::RelationshipToVictim, bool notify);
+        SystemResult<void> updateComplainantStatus(PGconn *, const JusticeFlow::SessionContext &,
+                                                   int id, JusticeFlow::ComplainantStatus, const char *reason);
+        SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(PGconn *, int case_id);
+
+        // Victims
+        SystemResult<int> addVictim(PGconn *, const JusticeFlow::SessionContext &,
+                                    int case_id, const char *cnic,
+                                    const char *injury_type, JusticeFlow::InjurySeverity,
+                                    JusticeFlow::VulnerabilityCategory, const char *medical_ref);
+        SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(PGconn *, int case_id);
+
+        // Witnesses
+        SystemResult<int> addWitness(PGconn *, const JusticeFlow::SessionContext &,
+                                     int case_id, const char *cnic,
+                                     const char *statement, const char *file_path,
+                                     JusticeFlow::WitnessProtection, bool conceal);
+        SystemResult<void> updateWitnessProtection(PGconn *, const JusticeFlow::SessionContext &,
+                                                   int witness_id, JusticeFlow::WitnessProtection);
+        SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(PGconn *, int case_id);
+
+        // Accused
+        SystemResult<int> addAccused(PGconn *, const JusticeFlow::SessionContext &,
+                                     int case_id, const char *cnic, JusticeFlow::InvolvementType);
+        SystemResult<void> linkAccusedAssociation(PGconn *, const JusticeFlow::SessionContext &,
+                                                  int accused_id, int associated_id,
+                                                  JusticeFlow::AssociationType);
+        SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(PGconn *, int case_id);
+
+        // Vehicles
+        SystemResult<void> linkVehicleToCase(PGconn *, const JusticeFlow::SessionContext &,
+                                             int case_id, int vehicle_id,
+                                             JusticeFlow::VehicleRole, const char *notes);
+        SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(PGconn *, int case_id);
+
+    private:
+        ISubsystem1Adapter *s1_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // InvestigationFacade — S2: FIR, mmap-secured evidence, charge sheets
+    // -----------------------------------------------------------------------------
+
+    /**
+     * All entity-creating calls return std::unique_ptr<T> inside SystemResult.
+     * The caller owns the returned entity.  submitChargeSheet receives the
+     * entity by raw non-owning pointer (caller keeps ownership of the unique_ptr).
+     */
+    class InvestigationFacade
+    {
+    public:
+        explicit InvestigationFacade(ISubsystem2Adapter *s2 = nullptr) noexcept : s2_(s2) {}
+
+        void setAdapter(ISubsystem2Adapter *a) noexcept { s2_ = a; }
+
+        /** UC-1 */
+        SystemResult<std::unique_ptr<subsystem2::Case>> registerFIR(
+            const subsystem2::FIRRegistrationRequest &request,
+            const JusticeFlow::SessionContext &session);
+
+        /** UC-2 */
+        SystemResult<std::unique_ptr<subsystem2::Evidence>> logAndSecureEvidence(
+            int64_t case_id, JusticeFlow::EvidenceType,
+            const std::string &description, const std::string &file_path,
+            const JusticeFlow::SessionContext &session);
+
+        /** UC-3 */
+        SystemResult<std::unique_ptr<subsystem2::ChargeSheet>> draftChargeSheet(
+            int64_t case_id, const JusticeFlow::SessionContext &session);
+
+        /** UC-4  sheet must not be nullptr. */
+        SystemResult<void> submitChargeSheet(
+            subsystem2::ChargeSheet *sheet,
+            const JusticeFlow::SessionContext &session);
+
+        /** UC-X */
+        SystemResult<std::unique_ptr<subsystem2::Case>> fetchCase(int64_t case_id);
+
+    private:
+        ISubsystem2Adapter *s2_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // PersonnelFacade — S1: officer profiles, rank history, deployments, reports
+    // -----------------------------------------------------------------------------
+
+    class PersonnelFacade
+    {
+    public:
+        explicit PersonnelFacade(ISubsystem1Adapter *s1 = nullptr) noexcept : s1_(s1) {}
+
+        void setAdapter(ISubsystem1Adapter *a) noexcept { s1_ = a; }
+
+        SystemResult<JusticeFlow::Officer> getOfficerById(PGconn *, int);
+        SystemResult<JusticeFlow::Officer> getOfficerByCnic(PGconn *, const char *);
+        SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStation(PGconn *, int);
+        SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStatus(PGconn *, int,
+                                                                            JusticeFlow::OfficerStatus);
+        SystemResult<void> updateOfficerStatus(PGconn *,
+                                               const JusticeFlow::SessionContext &,
+                                               int officer_id,
+                                               JusticeFlow::OfficerStatus);
+        SystemResult<int> promoteOfficer(PGconn *,
+                                         const JusticeFlow::SessionContext &,
+                                         int officer_id,
+                                         JusticeFlow::OfficerRank,
+                                         const char *belt,
+                                         const char *type,
+                                         const char *effective,
+                                         const char *order_date);
+        SystemResult<std::vector<JusticeFlow::OfficerRankHistory>> getOfficerRankHistory(PGconn *, int);
+        SystemResult<int> deployOfficer(PGconn *,
+                                        const JusticeFlow::SessionContext &,
+                                        int officer_id, int to_station,
+                                        const char *reason,
+                                        const char *order_no,
+                                        const char *from_date,
+                                        const char *until_date);
+        SystemResult<void> endDeployment(PGconn *,
+                                         const JusticeFlow::SessionContext &,
+                                         int deployment_id);
+        SystemResult<std::vector<JusticeFlow::OfficerDeployment>> getOfficerDeployments(PGconn *, int,
+                                                                                        bool active_only);
+        SystemResult<std::string> generateOfficerReport(PGconn *,
+                                                        const JusticeFlow::SessionContext &,
+                                                        int officer_id,
+                                                        subsystem1::ReportType);
+
+    private:
+        ISubsystem1Adapter *s1_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // DutyFacade — S1: duty scheduling, shift lifecycle, patrol routes
+    // -----------------------------------------------------------------------------
+
+    class DutyFacade
+    {
+    public:
+        explicit DutyFacade(ISubsystem1Adapter *s1 = nullptr) noexcept : s1_(s1) {}
+
+        void setAdapter(ISubsystem1Adapter *a) noexcept { s1_ = a; }
+
+        SystemResult<int> scheduleDuty(PGconn *,
+                                       const JusticeFlow::SessionContext &,
+                                       int officer_id, int station_id,
+                                       int patrol_route_id,
+                                       JusticeFlow::ShiftType,
+                                       const char *duty_date,
+                                       time_t start, time_t end);
+        SystemResult<void> markDutyStart(PGconn *,
+                                         const JusticeFlow::SessionContext &,
+                                         int duty_id);
+        SystemResult<void> markDutyEnd(PGconn *,
+                                       const JusticeFlow::SessionContext &,
+                                       int duty_id);
+        SystemResult<void> updateDutyStatus(PGconn *,
+                                            const JusticeFlow::SessionContext &,
+                                            int duty_id,
+                                            JusticeFlow::DutyStatus,
+                                            const char *absence_reason);
+        SystemResult<void> cancelDuty(PGconn *,
+                                      const JusticeFlow::SessionContext &,
+                                      int duty_id);
+        SystemResult<std::vector<JusticeFlow::DutyRoster>> getDutyRoster(PGconn *, int station_id,
+                                                                         const char *duty_date);
+        SystemResult<std::vector<JusticeFlow::DutyRoster>> getActiveDuties(PGconn *, int station_id);
+        SystemResult<std::vector<JusticeFlow::DutyRoster>> getOfficerDutyHistory(PGconn *, int officer_id,
+                                                                                 time_t from, time_t to);
+        SystemResult<int> createPatrolRoute(PGconn *,
+                                            const JusticeFlow::SessionContext &,
+                                            int station_id,
+                                            const char *beat_code,
+                                            const char *name,
+                                            const char *area);
+        SystemResult<void> deactivatePatrolRoute(PGconn *,
+                                                 const JusticeFlow::SessionContext &,
+                                                 int route_id);
+        SystemResult<std::vector<JusticeFlow::PatrolRoute>> getPatrolRoutesByStation(PGconn *, int station_id);
+
+    private:
+        ISubsystem1Adapter *s1_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // EnforcementFacade — S3: warrants, arrests, bail
+    // -----------------------------------------------------------------------------
+
+    class EnforcementFacade
+    {
+    public:
+        explicit EnforcementFacade(ISubsystem3Adapter *s3 = nullptr) noexcept : s3_(s3) {}
+
+        void setAdapter(ISubsystem3Adapter *a) noexcept { s3_ = a; }
+
+        // Warrants
+        SystemResult<int> requestWarrant(PGconn *,
+                                         const JusticeFlow::SessionContext &,
+                                         int case_id,
+                                         const char *accused_cnic,
+                                         JusticeFlow::WarrantType,
+                                         const char *magistrate,
+                                         const char *court,
+                                         const char *valid_until,
+                                         const char *target_address);
+        SystemResult<void> executeWarrant(PGconn *,
+                                          const JusticeFlow::SessionContext &,
+                                          int warrant_id);
+        SystemResult<void> cancelWarrant(PGconn *,
+                                         const JusticeFlow::SessionContext &,
+                                         int warrant_id, const char *reason);
+        SystemResult<std::vector<enforcement::WarrantRecord>> getWarrantsByCase(PGconn *, int case_id);
+        SystemResult<std::vector<enforcement::WarrantRecord>> getActiveWarrants(PGconn *, int station_id);
+
+        // Arrests
+        SystemResult<int> recordArrest(PGconn *,
+                                       const JusticeFlow::SessionContext &,
+                                       int case_id,
+                                       const char *accused_cnic,
+                                       const char *location,
+                                       int warrant_id);
+        SystemResult<void> updateCustodyStatus(PGconn *,
+                                               const JusticeFlow::SessionContext &,
+                                               int arrest_id,
+                                               JusticeFlow::CustodyStatus,
+                                               const char *reason);
+        SystemResult<void> markArrestAsDisputed(PGconn *,
+                                                const JusticeFlow::SessionContext &,
+                                                int arrest_id,
+                                                const char *reason);
+        SystemResult<std::vector<enforcement::ArrestRecord>> getArrestsByCase(PGconn *, int case_id);
+
+        // Bail
+        SystemResult<int> recordBail(PGconn *,
+                                     const JusticeFlow::SessionContext &,
+                                     int arrest_id,
+                                     JusticeFlow::BailType,
+                                     uint64_t amount_paise,
+                                     const char *court,
+                                     const char *magistrate,
+                                     const char *valid_until,
+                                     const char *surety_name,
+                                     const char *surety_cnic,
+                                     const char *surety_contact);
+        SystemResult<void> revokeBail(PGconn *,
+                                      const JusticeFlow::SessionContext &,
+                                      int bail_id, const char *reason);
+        SystemResult<enforcement::BailRecord> getBailByArrest(PGconn *, int arrest_id);
+
+    private:
+        ISubsystem3Adapter *s3_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // AuditFacade — S3 read-only audit trail (uses its own DB connection via S3)
+    // -----------------------------------------------------------------------------
+
+    class AuditFacade
+    {
+    public:
+        explicit AuditFacade(ISubsystem3Adapter *s3 = nullptr) noexcept : s3_(s3) {}
+
+        void setAdapter(ISubsystem3Adapter *a) noexcept { s3_ = a; }
+
+        SystemResult<std::vector<audit::AuditRecord>> getAuditChangeHistory(int case_id);
+        SystemResult<std::vector<audit::AuditRecord>> getAuditOfficerActions(int officer_id,
+                                                                             time_t from, time_t to);
+        SystemResult<std::vector<audit::AuditRecord>> getAuditTableChanges(const char *table_name,
+                                                                           int record_id);
+        SystemResult<std::vector<audit::AuditRecord>> auditQueryByTimeWindow(time_t from, time_t to);
+        SystemResult<std::vector<audit::AuditRecord>> detectSuspiciousActivity(int station_id);
+
+    private:
+        ISubsystem3Adapter *s3_;
+    };
+
+    // -----------------------------------------------------------------------------
+    // ForensicFacade — S3 forensic lab workflow (token-authenticated)
+    // -----------------------------------------------------------------------------
+
+    class ForensicFacade
+    {
+    public:
+        explicit ForensicFacade(ISubsystem3Adapter *s3 = nullptr) noexcept : s3_(s3) {}
+
+        void setAdapter(ISubsystem3Adapter *a) noexcept { s3_ = a; }
+
+        SystemResult<int> createForensicRequest(const char *token,
+                                                int case_id,
+                                                const char *purpose,
+                                                const char *purpose_desc,
+                                                const char *lab_name,
+                                                const char *examiner_name);
+        SystemResult<void> linkEvidence(const char *token, int request_id,
+                                        int evidence_id, const char *notes);
+        SystemResult<void> recordLabReceipt(const char *token, int request_id,
+                                            const char *received_date);
+        SystemResult<void> recordExaminationStart(const char *token,
+                                                  int request_id);
+        SystemResult<void> recordFindings(const char *token, int request_id,
+                                          const char *findings,
+                                          const char *report_file_path,
+                                          const char *delivery_date);
+        SystemResult<void> recordAmendment(const char *token, int request_id,
+                                           const char *amended_findings);
+        SystemResult<void> contestReport(const char *token, int request_id,
+                                         const char *reason);
+        SystemResult<std::vector<forensic::ForensicRecord>> getForensicRequestsByCase(const char *token,
+                                                                                      int case_id);
+        SystemResult<std::vector<forensic::ForensicRecord>> getPendingForensicRequests(const char *token,
+                                                                                       int station_id);
+        SystemResult<std::vector<forensic::EvidenceRef>> getEvidenceByForensicRequest(const char *token,
+                                                                                      int request_id);
+
+    private:
+        ISubsystem3Adapter *s3_;
+    };
+
+    // =============================================================================
+    // SystemManager — Singleton: lifecycle + sub-facade access (Fix #1 #4 #5 #7)
     // =============================================================================
 
     /**
      * @class SystemManager
-     * @brief Top-level gateway to the entire JusticeFlow platform.
+     * @brief Process-wide gateway to the JusticeFlow platform.
      *
-     * Roles:
-     *   - FACADE   : single include, single object, uniform call surface.
-     *   - MANAGER  : owns system lifecycle (init / shutdown) and guards every
-     *                method call against use-before-init.
-     *   - DI HOST  : holds adapter slots that can be replaced before init(),
-     *                enabling testing and phased subsystem migration.
-     *
-     * Thread Safety:
-     *   getInstance() is thread-safe under C++11 §6.7.
-     *   Individual method calls are NOT synchronised here; the underlying
-     *   subsystem managers and the DB/IPC layers own their concurrency contracts.
-     *   The gateway is responsible for per-request connection pool management.
+     * Obtain sub-facades via typed accessors (auth(), cases(), etc.) rather
+     * than calling methods directly — this keeps the manager itself narrow
+     * and eliminates the God Object anti-pattern.
      */
     class SystemManager
     {
@@ -768,660 +1008,94 @@
         // Singleton
         // =========================================================================
 
-        /** @brief Returns the single process-wide SystemManager instance. */
         static SystemManager &getInstance();
 
-        // Non-copyable, non-movable
         SystemManager(const SystemManager &) = delete;
         SystemManager &operator=(const SystemManager &) = delete;
         SystemManager(SystemManager &&) = delete;
         SystemManager &operator=(SystemManager &&) = delete;
 
         // =========================================================================
-        // Dependency Injection — call before init() to override defaults
+        // Dependency Injection — Fix #7: throws on post-init injection
         // =========================================================================
 
         /**
-         * @brief Replace the auth adapter.
-         * If not called, the default adapter delegates to auth::AuthManager.
-         * @pre Must be called before init().
+         * @throws std::logic_error if init() has already been called.
+         * Call from the main thread before init().
          */
         void injectAuth(std::unique_ptr<IAuthAdapter> adapter);
-
-        /**
-         * @brief Replace the Subsystem 1 adapter.
-         * If not called, the default adapter delegates to subsystem1::Subsystem1.
-         * @pre Must be called before init().
-         */
         void injectS1(std::unique_ptr<ISubsystem1Adapter> adapter);
-
-        /**
-         * @brief Replace the Subsystem 2 adapter.
-         * If not called, the default adapter delegates to subsystem2::Subsystem2.
-         * @pre Must be called before init().
-         */
         void injectS2(std::unique_ptr<ISubsystem2Adapter> adapter);
-
-        /**
-         * @brief Replace the Subsystem 3 adapter.
-         * If not called, the default adapter delegates to subsystem3::Subsystem3.
-         * @pre Must be called before init().
-         */
         void injectS3(std::unique_ptr<ISubsystem3Adapter> adapter);
 
         // =========================================================================
-        // Lifecycle — Manager responsibility
+        // Lifecycle — Fix #4: staged, explicit init order
         // =========================================================================
 
         /**
-         * @brief Initialise the system.
+         * @brief Initialise the entire system in dependency order:
          *
-         * Installs default adapters for any slot not already filled via
-         * injectXxx(), then calls subsystem-specific startup routines
-         * (notably S3 audit connection setup).
+         *   Stage 1 — Install default adapters for any slot not pre-injected.
+         *   Stage 2 — Init Auth (no persistent external connection needed).
+         *   Stage 3 — Init S1 & S2 (stateless, no startup I/O).
+         *   Stage 4 — Init S3 audit: open dedicated read-only audit DB connection.
+         *   Stage 5 — Wire all sub-facades to their adapter pointers.
          *
-         * @param audit_conninfo  libpq connection string for the read-only audit DB.
-         * @return OK on full success; first failing ResultCode otherwise.
+         * On any stage failure the system remains uninitialised.
+         * shutdown() is safe to call to release any partially acquired resources.
          */
-        JusticeFlow::ResultCode init(const char *audit_conninfo);
+        SystemResult<void> init(const SystemInitConfig &config);
 
         /**
-         * @brief Tear down all subsystem resources in reverse-init order.
-         * Safe to call even if init() was never called (no-op).
+         * @brief Release all resources in reverse-init order.
+         * Safe to call even if init() never completed (no-op for uninitialised stages).
          */
         void shutdown();
 
-        /** @return true once init() has completed successfully. */
-        bool isInitialized() const noexcept { return initialized_; }
+        /** Thread-safe status check. */
+        bool isInitialized() const noexcept
+        {
+            return initialized_.load(std::memory_order_acquire);
+        }
 
         // =========================================================================
-        // Auth facade
+        // Sub-facade accessors
         // =========================================================================
 
-        JusticeFlow::ResultCode login(
-            const char *cnic,
-            const char *password,
-            std::string &out_token);
-
-        JusticeFlow::ResultCode validateToken(
-            const char *token,
-            JusticeFlow::SessionContext &out_session);
-
-        JusticeFlow::ResultCode validateRank(
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::OfficerRank required_rank);
-
-        bool isDutyActive(int officer_id);
-
-        JusticeFlow::ResultCode refreshSession(const char *token);
-
-        JusticeFlow::ResultCode logout(const char *token);
-
-        // =========================================================================
-        // Subsystem 1 facade — Case Management
-        // =========================================================================
-
-        bool registerCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            JusticeFlow::CaseType case_type,
-            time_t incident_date,
-            const char *incident_address,
-            const char *description,
-            double lat, double lon,
-            int station_id,
-            const char *complainant_cnic,
-            int &out_case_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getCaseById(
-            PGconn *conn, int case_id,
-            JusticeFlow::Case &out);
-
-        JusticeFlow::ResultCode getCasesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Case> &out);
-
-        JusticeFlow::ResultCode getCasesByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::CaseStatus status,
-            std::vector<JusticeFlow::Case> &out);
-
-        bool updateCaseStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            JusticeFlow::CaseStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code);
-
-        bool closeCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *closure_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        bool reopenCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *reopen_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        bool transferCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            int to_station_id,
-            const char *transfer_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getCaseStatusLog(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseStatusLog> &out);
-
-        // ── Officer Assignment ────────────────────────────────────────────────────
-
-        bool assignOfficerToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::CaseOfficerRole role,
-            JusticeFlow::ResultCode &out_code);
-
-        bool relieveOfficerFromCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getAssignedOfficers(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::CaseOfficer> &out);
-
-        // ── Complainants ──────────────────────────────────────────────────────────
-
-        bool addComplainant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::RelationshipToVictim relation,
-            bool notify_on_update,
-            int &out_complainant_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool updateComplainantStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int complainant_id,
-            JusticeFlow::ComplainantStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getComplainantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Complainant> &out);
-
-        // ── Victims ───────────────────────────────────────────────────────────────
-
-        bool addVictim(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *injury_type,
-            JusticeFlow::InjurySeverity injury_severity,
-            JusticeFlow::VulnerabilityCategory vulnerability,
-            const char *medical_report_ref,
-            int &out_victim_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getVictimsByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Victim> &out);
-
-        // ── Witnesses ─────────────────────────────────────────────────────────────
-
-        bool addWitness(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *statement_text,
-            const char *statement_file_path,
-            JusticeFlow::WitnessProtection protection_status,
-            bool conceal_identity,
-            int &out_witness_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool updateWitnessProtection(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int witness_id,
-            JusticeFlow::WitnessProtection new_status,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getWitnessesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Witness> &out);
-
-        // ── Accused ───────────────────────────────────────────────────────────────
-
-        bool addAccused(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::InvolvementType involvement,
-            int &out_accused_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool linkAccusedAssociation(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int accused_id, int associated_accused_id,
-            JusticeFlow::AssociationType association_type,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getAccusedByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::Accused> &out);
-
-        // ── Vehicles ──────────────────────────────────────────────────────────────
-
-        bool linkVehicleToCase(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id, int vehicle_id,
-            JusticeFlow::VehicleRole role,
-            const char *condition_notes,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getVehiclesByCase(
-            PGconn *conn, int case_id,
-            std::vector<JusticeFlow::VehicleCase> &out);
-
-        // =========================================================================
-        // Subsystem 1 facade — Duty & Patrol
-        // =========================================================================
-
-        bool scheduleDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id, int station_id, int patrol_route_id,
-            JusticeFlow::ShiftType shift_type,
-            const char *duty_date,
-            time_t scheduled_start, time_t scheduled_end,
-            int &out_duty_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool markDutyStart(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool markDutyEnd(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool updateDutyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::DutyStatus new_status,
-            const char *absence_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        bool cancelDuty(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int duty_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getDutyRoster(
-            PGconn *conn, int station_id,
-            const char *duty_date,
-            std::vector<JusticeFlow::DutyRoster> &out);
-
-        JusticeFlow::ResultCode getActiveDuties(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::DutyRoster> &out);
-
-        JusticeFlow::ResultCode getOfficerDutyHistory(
-            PGconn *conn, int officer_id,
-            time_t from, time_t to,
-            std::vector<JusticeFlow::DutyRoster> &out);
-
-        bool createPatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int station_id,
-            const char *beat_code,
-            const char *route_name,
-            const char *area_description,
-            int &out_route_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool deactivatePatrolRoute(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int route_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getPatrolRoutesByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::PatrolRoute> &out);
-
-        // =========================================================================
-        // Subsystem 1 facade — Personnel
-        // =========================================================================
-
-        JusticeFlow::ResultCode getOfficerById(
-            PGconn *conn, int officer_id,
-            JusticeFlow::Officer &out);
-
-        JusticeFlow::ResultCode getOfficerByCnic(
-            PGconn *conn, const char *cnic,
-            JusticeFlow::Officer &out);
-
-        JusticeFlow::ResultCode getOfficersByStation(
-            PGconn *conn, int station_id,
-            std::vector<JusticeFlow::Officer> &out);
-
-        JusticeFlow::ResultCode getOfficersByStatus(
-            PGconn *conn, int station_id,
-            JusticeFlow::OfficerStatus status,
-            std::vector<JusticeFlow::Officer> &out);
-
-        bool updateOfficerStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerStatus new_status,
-            JusticeFlow::ResultCode &out_code);
-
-        bool promoteOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            JusticeFlow::OfficerRank new_rank,
-            const char *new_belt_number,
-            const char *promotion_type,
-            const char *effective_date,
-            const char *order_date,
-            int &out_history_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getOfficerRankHistory(
-            PGconn *conn, int officer_id,
-            std::vector<JusticeFlow::OfficerRankHistory> &out);
-
-        bool deployOfficer(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id, int to_station_id,
-            const char *deployment_reason,
-            const char *order_number,
-            const char *deployed_from,
-            const char *deployed_until,
-            int &out_deployment_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool endDeployment(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int deployment_id,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getOfficerDeployments(
-            PGconn *conn, int officer_id,
-            bool active_only,
-            std::vector<JusticeFlow::OfficerDeployment> &out);
-
-        JusticeFlow::ResultCode generateOfficerReport(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int officer_id,
-            subsystem1::ReportType type,
-            std::string &out_report_text);
-
-        // =========================================================================
-        // Subsystem 2 facade — Investigation & Case Processing
-        // =========================================================================
-
-        /** UC-1 */
-        JusticeFlow::ResultCode registerFIR(
-            const subsystem2::FIRRegistrationRequest &request,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Case *&out_case);
-
-        /** UC-2 */
-        JusticeFlow::ResultCode logAndSecureEvidence(
-            int64_t case_id,
-            JusticeFlow::EvidenceType type,
-            const std::string &description,
-            const std::string &file_path,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::Evidence *&out_evidence);
-
-        /** UC-3 */
-        JusticeFlow::ResultCode draftChargeSheet(
-            int64_t case_id,
-            const JusticeFlow::SessionContext &session,
-            subsystem2::ChargeSheet *&out_sheet);
-
-        /** UC-4 */
-        JusticeFlow::ResultCode submitChargeSheet(
-            subsystem2::ChargeSheet *sheet,
-            const JusticeFlow::SessionContext &session);
-
-        /** UC-X */
-        JusticeFlow::ResultCode fetchCase(
-            int64_t case_id,
-            subsystem2::Case *&out_case);
-
-        // =========================================================================
-        // Subsystem 3 facade — Audit
-        // =========================================================================
-
-        JusticeFlow::ResultCode getAuditChangeHistory(
-            int case_id,
-            std::vector<audit::AuditRecord> &out);
-
-        JusticeFlow::ResultCode getAuditOfficerActions(
-            int officer_id,
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out);
-
-        JusticeFlow::ResultCode getAuditTableChanges(
-            const char *table_name,
-            int record_id,
-            std::vector<audit::AuditRecord> &out);
-
-        JusticeFlow::ResultCode auditQueryByTimeWindow(
-            time_t from, time_t to,
-            std::vector<audit::AuditRecord> &out);
-
-        JusticeFlow::ResultCode detectSuspiciousActivity(
-            int station_id,
-            std::vector<audit::AuditRecord> &out);
-
-        // =========================================================================
-        // Subsystem 3 facade — Warrants
-        // =========================================================================
-
-        bool requestWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            JusticeFlow::WarrantType warrant_type,
-            const char *magistrate_name,
-            const char *issuing_court,
-            const char *valid_until,
-            const char *target_address,
-            int &out_warrant_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool executeWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool cancelWarrant(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int warrant_id,
-            const char *cancellation_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getWarrantsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::WarrantRecord> &out);
-
-        JusticeFlow::ResultCode getActiveWarrants(
-            PGconn *conn, int station_id,
-            std::vector<enforcement::WarrantRecord> &out);
-
-        // =========================================================================
-        // Subsystem 3 facade — Arrests
-        // =========================================================================
-
-        bool recordArrest(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int case_id,
-            const char *accused_cnic,
-            const char *arrest_location,
-            int warrant_id,
-            int &out_arrest_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool updateCustodyStatus(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::CustodyStatus new_status,
-            const char *reason,
-            JusticeFlow::ResultCode &out_code);
-
-        bool markArrestAsDisputed(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            const char *dispute_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getArrestsByCase(
-            PGconn *conn, int case_id,
-            std::vector<enforcement::ArrestRecord> &out);
-
-        // =========================================================================
-        // Subsystem 3 facade — Bail
-        // =========================================================================
-
-        bool recordBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int arrest_id,
-            JusticeFlow::BailType bail_type,
-            uint64_t bail_amount_paise,
-            const char *court_name,
-            const char *magistrate_name,
-            const char *valid_until,
-            const char *surety_name,
-            const char *surety_cnic,
-            const char *surety_contact,
-            int &out_bail_id,
-            JusticeFlow::ResultCode &out_code);
-
-        bool revokeBail(
-            PGconn *conn,
-            const JusticeFlow::SessionContext &session,
-            int bail_id,
-            const char *revocation_reason,
-            JusticeFlow::ResultCode &out_code);
-
-        JusticeFlow::ResultCode getBailByArrest(
-            PGconn *conn, int arrest_id,
-            enforcement::BailRecord &out);
-
-        // =========================================================================
-        // Subsystem 3 facade — Forensic & Lab
-        // =========================================================================
-
-        JusticeFlow::ResultCode createForensicRequest(
-            const char *token,
-            int case_id,
-            const char *examination_purpose,
-            const char *purpose_description,
-            const char *lab_name,
-            const char *examiner_name,
-            int &out_request_id);
-
-        JusticeFlow::ResultCode linkEvidence(
-            const char *token,
-            int request_id,
-            int evidence_id,
-            const char *notes);
-
-        JusticeFlow::ResultCode recordLabReceipt(
-            const char *token,
-            int request_id,
-            const char *received_date);
-
-        JusticeFlow::ResultCode recordExaminationStart(
-            const char *token,
-            int request_id);
-
-        JusticeFlow::ResultCode recordFindings(
-            const char *token,
-            int request_id,
-            const char *findings,
-            const char *report_file_path,
-            const char *delivery_date);
-
-        JusticeFlow::ResultCode recordAmendment(
-            const char *token,
-            int request_id,
-            const char *amended_findings);
-
-        JusticeFlow::ResultCode contestReport(
-            const char *token,
-            int request_id,
-            const char *contest_reason);
-
-        JusticeFlow::ResultCode getForensicRequestsByCase(
-            const char *token, int case_id,
-            std::vector<forensic::ForensicRecord> &out);
-
-        JusticeFlow::ResultCode getPendingForensicRequests(
-            const char *token, int station_id,
-            std::vector<forensic::ForensicRecord> &out);
-
-        JusticeFlow::ResultCode getEvidenceByForensicRequest(
-            const char *token, int request_id,
-            std::vector<forensic::EvidenceRef> &out);
+        AuthFacade &auth() noexcept { return auth_facade_; }
+        CaseFacade &cases() noexcept { return case_facade_; }
+        InvestigationFacade &investigation() noexcept { return inv_facade_; }
+        PersonnelFacade &personnel() noexcept { return personnel_facade_; }
+        DutyFacade &duty() noexcept { return duty_facade_; }
+        EnforcementFacade &enforcement() noexcept { return enforcement_facade_; }
+        AuditFacade &audit() noexcept { return audit_facade_; }
+        ForensicFacade &forensic() noexcept { return forensic_facade_; }
 
     private:
         SystemManager() = default;
         ~SystemManager() = default;
 
-        // ── Injected adapter slots ────────────────────────────────────────────────
-        std::unique_ptr<IAuthAdapter> auth_;
-        std::unique_ptr<ISubsystem1Adapter> s1_;
-        std::unique_ptr<ISubsystem2Adapter> s2_;
-        std::unique_ptr<ISubsystem3Adapter> s3_;
+        // ── Fix #7: guard injection against post-init calls ───────────────────────
+        void assertNotInitialized(const char *caller) const;
 
-        bool initialized_ = false;
+        // ── Fix #5: atomic flag for thread-safe init check ────────────────────────
+        std::atomic<bool> initialized_{false};
 
-        /**
-         * @brief Guard used at the top of every public method.
-         * Logs a fatal message and returns NOT_INITIALIZED if called before init().
-         */
-        JusticeFlow::ResultCode guardInitialized(const char *caller) const;
+        // ── Adapter ownership (unique_ptr = clear lifetime, no leaks) ─────────────
+        std::unique_ptr<IAuthAdapter> auth_adapter_;
+        std::unique_ptr<ISubsystem1Adapter> s1_adapter_;
+        std::unique_ptr<ISubsystem2Adapter> s2_adapter_;
+        std::unique_ptr<ISubsystem3Adapter> s3_adapter_;
+
+        // ── Sub-facades (wired during init(); adapters must outlive them) ──────────
+        AuthFacade auth_facade_;
+        CaseFacade case_facade_;
+        InvestigationFacade inv_facade_;
+        PersonnelFacade personnel_facade_;
+        DutyFacade duty_facade_;
+        EnforcementFacade enforcement_facade_;
+        AuditFacade audit_facade_;
+        ForensicFacade forensic_facade_;
     };
 
 } // namespace system_layer
