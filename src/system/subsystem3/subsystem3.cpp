@@ -3,7 +3,7 @@
  * @brief Subsystem 3 public facade implementation (routing to managers).
  */
 
-#include "subsystem3/subsystem3.h"
+#include "subsystem3.h"
 
 namespace subsystem3
 {

@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // Every write operation follows the same chain (short-circuit on any failure):
-//   1. AuthManager::validateToken()   — session must be valid, loads SessionContext
+//   1. AuthManager::validateToken()   — session must be valid, loads JusticeFlow::SessionContext
 //   2. AuthManager::isDutyActive()    — officer must be on duty
 //   3. AuthManager::validateRank()    — only where INSPECTOR+ is required
 //   4. _validateTransition()          — state machine enforcement (no DB write if illegal)
@@ -21,7 +21,7 @@
 #include "../include/forensic_manager.h"
 #include "../include/forensic_repository.h"
 #include "../../../shr_infra/auth/include/auth_module.h"
-#include "os_layer/ipc/include/ipc_manager.h"
+#include "os_layer/os_layer.h"
 #include "common/logger.h"
 #include <cstring>
 #include <cstdio>
@@ -99,20 +99,74 @@ namespace forensic
     // Written as inline logic rather than a macro so the compiler sees it clearly.
     // ============================================================================
 
+    /**
+     * ==============================================================================
+     * TODO: PERMANENT ARCHITECTURE FIX (Post-Presentation)
+     * ==============================================================================
+     *
+     * ISSUE:
+     * Currently, we return a raw `PGconn*` to the caller and rely on the caller to
+     * manually call lockDb() and unlockDb(). This is an anti-pattern. If a caller
+     * forgets to unlock, or if an exception is thrown while the lock is held, the
+     * entire application will deadlock. Furthermore, having only ONE connection
+     * locked by a mutex means only one user can access the DB at a time (bottleneck).
+     *
+     * PERMANENT FIX PLAN:
+     *
+     * 1. UPGRADE TO C++ std::mutex (RAII)
+     *    Replace `pthread_mutex_t` in UnixSocket with `std::mutex db_mutex`.
+     *    This allows the use of `std::lock_guard<std::mutex> lock(db_mutex);`
+     *    which automatically unlocks when it goes out of scope, guaranteeing we
+     *    never leave a mutex locked by accident.
+     *
+     * 2. REMOVE getConnection()
+     *    Stop handing out raw pointers. Instead, callers should ONLY use the safe
+     *    `UnixSocket::execute()` method, which handles its own locking internally.
+     *    If custom PQ functions are needed, implement a callback pattern:
+     *    `void withConnection(std::function<void(PGconn*)> func)` so the socket
+     *    manages the lock lifecycle.
+     *
+     * 3. IMPLEMENT A CONNECTION POOL (For Production Scale)
+     *    Instead of a single PGconn, create a class `ConnectionPool`.
+     *    - Initialize it with ~10 PGconn objects.
+     *    - Callers request a connection: `PGconn* conn = pool.acquire();`
+     *    - Callers execute queries (NO mutex locking needed during query execution!).
+     *    - Callers return it: `pool.release(conn);`
+     *    This completely removes the bottleneck and allows true multi-threading.
+     * ==============================================================================
+     */
+
     // Returns DB_ERROR if IpcManager has no connection.
     // Returns SESSION_EXPIRED if token is invalid.
     // Populates ctx on success.
     static ResultCode _authAndConn(const char *token,
                                    PGconn *&out_conn,
-                                   SessionContext &out_ctx)
+                                   JusticeFlow::SessionContext &out_ctx)
     {
-        out_conn = ipc::IpcManager::getInstance().connectDatabase();
-        if (out_conn)
+        // 1. ACQUIRE THE LOCK BEFORE GETTING THE CONNECTION
+        ipc::IpcManager::getInstance().lockDb();
+
+        out_conn = ipc::IpcManager::getInstance().getConnection();
+        if (!out_conn)
         {
             Logger::error("forensic_manager: No DB connection available");
+            // MUST UNLOCK BEFORE RETURNING ON ERROR
+            ipc::IpcManager::getInstance().unlockDb();
             return ResultCode::DB_ERROR;
         }
-        return AuthManager::getInstance.validateToken(token, out_ctx);
+
+        ResultCode auth_res = auth::AuthManager::getInstance().validateToken(token, out_ctx);
+
+        if (auth_res != ResultCode::OK)
+        {
+            // MUST UNLOCK BEFORE RETURNING ON ERROR
+            ipc::IpcManager::getInstance().unlockDb();
+            out_conn = nullptr;
+        }
+
+        // ON SUCCESS: We return the connection, but LEAVE THE DB LOCKED.
+        // The caller MUST call unlockDb() when they are finished with out_conn!
+        return auth_res;
     }
 
     // ============================================================================
@@ -130,7 +184,7 @@ namespace forensic
     {
         // --- Step 1: Validate token, load session ---
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
         {
@@ -140,7 +194,7 @@ namespace forensic
 
         // --- Step 2: Officer must be on active duty ---
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
         {
             Logger::debug("forensic_manager: createForensicRequest — officer not on duty");
@@ -149,7 +203,7 @@ namespace forensic
 
         // --- Step 3: INSPECTOR+ rank required to authorise forensic request ---
         bool rank_ok = false;
-        rc = AuthManager::validateRank(ctx.officerId, OfficerRank::INSPECTOR, rank_ok);
+        rc = auth::AuthManager::getInstance().validateRank(ctx, static_cast<int>(OfficerRank::INSPECTOR));
         if (rc != ResultCode::OK || !rank_ok)
         {
             Logger::debug("forensic_manager: createForensicRequest — rank insufficient");
@@ -226,14 +280,14 @@ namespace forensic
     {
         // --- Step 1: token + conn ---
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         // --- Step 2: duty ---
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
@@ -347,14 +401,14 @@ namespace forensic
     {
         // --- token + conn ---
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         // --- duty ---
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
@@ -410,13 +464,13 @@ namespace forensic
         int request_id)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
@@ -456,13 +510,13 @@ namespace forensic
         const char *delivery_date)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
@@ -542,20 +596,20 @@ namespace forensic
         const char *amended_findings)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         // --- duty ---
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
         // --- INSPECTOR+ rank required ---
         bool rank_ok = false;
-        rc = AuthManager::validateRank(ctx.officerId, OfficerRank::INSPECTOR, rank_ok);
+        rc = auth::AuthManager::getInstance().validateRank(ctx, static_cast<int>(OfficerRank::INSPECTOR));
         if (rc != ResultCode::OK || !rank_ok)
         {
             Logger::debug("forensic_manager: recordAmendment — INSPECTOR+ required");
@@ -605,13 +659,13 @@ namespace forensic
         const char *contest_reason)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
 
         bool on_duty = false;
-        rc = AuthManager::isDutyActive(ctx.officerId, on_duty);
+        rc = auth::AuthManager::getInstance().isDutyActive(ctx.officerId, on_duty);
         if (rc != ResultCode::OK || !on_duty)
             return ResultCode::DUTY_INACTIVE;
 
@@ -657,7 +711,7 @@ namespace forensic
         std::vector<ForensicRecord> &out)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
@@ -671,7 +725,7 @@ namespace forensic
         std::vector<ForensicRecord> &out)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;
@@ -685,7 +739,7 @@ namespace forensic
         std::vector<EvidenceRef> &out)
     {
         PGconn *conn = nullptr;
-        SessionContext ctx{};
+        JusticeFlow::SessionContext ctx{};
         ResultCode rc = _authAndConn(token, conn, ctx);
         if (rc != ResultCode::OK)
             return rc;

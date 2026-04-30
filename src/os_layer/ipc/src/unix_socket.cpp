@@ -43,6 +43,12 @@ namespace ipc
         return true;
     }
 
+    PGconn *UnixSocket::getConnection() const
+    {
+        // Note: Caller must hold lock to safely access conn
+        return conn;
+    }
+
     JusticeFlow::ResultCode UnixSocket::connect()
     {
         conn = PQconnectdb(conn_string.c_str());

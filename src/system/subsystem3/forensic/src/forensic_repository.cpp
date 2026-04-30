@@ -40,9 +40,9 @@
 //   7  fre.linked_at (epoch)
 // ============================================================================
 
-#include "forensic/include/forensic_repository.h"
+#include "../include/forensic_repository.h"
 #include "common/logger.h"
-#include <libpq-fe.h>
+#include <postgresql/libpq-fe.h>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>

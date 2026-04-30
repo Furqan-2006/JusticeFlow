@@ -32,6 +32,11 @@ namespace ipc
         : db_socket(getSecureConnectionString()),
           shm_handler(SHM_NAME) {}
 
+    PGconn *IpcManager::getConnection()
+    {
+        return db_socket.getConnection();
+    }
+
     JusticeFlow::ResultCode IpcManager::connectDatabase()
     {
         Logger::info("[IPC] Connecting to database...");
@@ -110,6 +115,16 @@ namespace ipc
     SharedStatusTable *IpcManager::getStatusTable()
     {
         return shm_handler.getTable();
+    }
+
+    JusticeFlow::ResultCode IpcManager::lockDb()
+    {
+        return db_socket.lock();
+    }
+
+    JusticeFlow::ResultCode IpcManager::unlockDb()
+    {
+        return db_socket.unlock();
     }
 
 } // namespace ipc

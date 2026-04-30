@@ -51,6 +51,7 @@ namespace ipc
 
         // ========== Database Interface ==========
 
+        PGconn *getConnection();
         /**
          * Connects to the PostgreSQL database via Unix domain socket.
          *
@@ -138,6 +139,9 @@ namespace ipc
          * @return Pointer to SharedStatusTable in shared memory, or nullptr if not attached
          */
         SharedStatusTable *getStatusTable();
+
+        JusticeFlow::ResultCode lockDb();
+        JusticeFlow::ResultCode unlockDb();
     };
 
 } // namespace ipc
