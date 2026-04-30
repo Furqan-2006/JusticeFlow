@@ -651,7 +651,10 @@ namespace ipc
     {
         // Validate and clamp pagination params.
         std::string limit = safeIntStr(req.param("limit", "100"), 100, 1, 500);
-        std::string offset = safeIntStr(req.param("offset", "0"), 0, 0, INT_MAX);
+        // Cap offset at 100 000 — beyond that, results are useless and
+        // the query would hammer the DB with a full sequential scan skip.
+        static constexpr int MAX_SQL_OFFSET = 100'000;
+        std::string offset = safeIntStr(req.param("offset", "0"), 0, 0, MAX_SQL_OFFSET);
 
         std::string query =
             "SELECT case_id, case_type, status, registered_at "
