@@ -22,6 +22,7 @@ namespace JusticeFlow
         NOT_FOUND = 10,
         ALREADY_EXISTS = 11,
         INVALID_INPUT = 12,
+        INVALID_ARGUMENT = 13,
 
         // System & DB
         DB_ERROR = 20,

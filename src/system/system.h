@@ -413,7 +413,7 @@ namespace system_layer
 
         virtual SystemResult<std::string> generateOfficerReport(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int officer_id, subsystem1::ReportType) = 0;
+            int officer_id, JusticeFlow::ReportType) = 0;
     };
 
     // -----------------------------------------------------------------------------
@@ -797,7 +797,7 @@ namespace system_layer
         SystemResult<std::string> generateOfficerReport(PGconn *,
                                                         const JusticeFlow::SessionContext &,
                                                         int officer_id,
-                                                        subsystem1::ReportType);
+                                                        JusticeFlow::ReportType);
 
     private:
         ISubsystem1Adapter *s1_;
