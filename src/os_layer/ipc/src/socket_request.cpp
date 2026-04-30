@@ -14,7 +14,7 @@
  * parseJson() helper and fromJson() body — the public API stays the same.
  */
 
-#include "socket_request.h"
+#include "../include/socket_request.h"
 
 #include <algorithm>
 #include <cctype>

@@ -17,9 +17,9 @@
  *            are not async-signal-safe).
  */
 
-#include "domain_socket.h"
-#include "ipc_manager.h"
-#include "shm_layout.h"
+#include "../include/domain_socket.h"
+#include "../include/ipc_manager.h"
+#include "../include/shm_layout.h"
 
 #include "../../../common/logger.h"
 
