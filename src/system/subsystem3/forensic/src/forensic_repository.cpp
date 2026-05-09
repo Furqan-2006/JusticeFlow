@@ -39,7 +39,6 @@
 //   6  fre.notes
 //   7  fre.linked_at (epoch)
 // ============================================================================
-
 #include "../include/forensic_repository.h"
 #include "common/logger.h"
 #include <postgresql/libpq-fe.h>
@@ -52,11 +51,6 @@ using namespace JusticeFlow;
 
 namespace forensic
 {
-
-    // ============================================================================
-    // Internal helpers
-    // ============================================================================
-
     // Safe copy into a fixed-size buffer — truncates if source is longer.
     static void _scopy(char *dst, int dst_size, const char *src)
     {
@@ -77,10 +71,8 @@ namespace forensic
         return static_cast<time_t>(std::atol(s));
     }
 
-    // ============================================================================
-    // _mapRecord  —  PGresult row → ForensicRecord
-    // ============================================================================
-    void ForensicRepository::_mapRecord(pg_result *res, int row, ForensicRecord &r)
+    // --- FIX: Signature matches PGresult ---
+    void ForensicRepository::_mapRecord(PGresult *res, int row, ForensicRecord &r)
     {
         r = ForensicRecord{};
 
@@ -107,10 +99,8 @@ namespace forensic
         r.updated_at = _epoch(PQgetvalue(res, row, 20));
     }
 
-    // ============================================================================
-    // _mapEvidenceRef  —  PGresult row → EvidenceRef
-    // ============================================================================
-    void ForensicRepository::_mapEvidenceRef(pg_result *res, int row, EvidenceRef &e)
+    // --- FIX: Signature matches PGresult ---
+    void ForensicRepository::_mapEvidenceRef(PGresult *res, int row, EvidenceRef &e)
     {
         e = EvidenceRef{};
         e.evidence_id = std::atoi(PQgetvalue(res, row, 0));
@@ -123,9 +113,6 @@ namespace forensic
         e.linked_at = _epoch(PQgetvalue(res, row, 7));
     }
 
-    // ============================================================================
-    // SELECT fragment reused in selectByCase and selectPending
-    // ============================================================================
     static const char *kSelectCols =
         "SELECT flr.request_id, flr.case_id, flr.request_number, flr.request_status, "
         "       flr.lab_name, flr.examiner_name, flr.examination_purpose, "
@@ -144,9 +131,6 @@ namespace forensic
         "       EXTRACT(EPOCH FROM flr.updated_at)::bigint "
         "FROM public.Forensic_Lab_Requests flr ";
 
-    // ============================================================================
-    // insertRequest
-    // ============================================================================
     ResultCode ForensicRepository::insertRequest(
         PGconn *conn,
         int case_id,
@@ -157,7 +141,6 @@ namespace forensic
         int authorized_by,
         int &out_request_id)
     {
-        // Generate a unique request number: FR-<epoch>-<case_id>
         char req_number[32];
         std::snprintf(req_number, sizeof(req_number),
                       "FR-%ld-%d", static_cast<long>(std::time(nullptr)), case_id);
@@ -167,13 +150,8 @@ namespace forensic
         std::snprintf(p_auth, sizeof(p_auth), "%d", authorized_by);
 
         const char *params[7] = {
-            req_number,
-            p_case,
-            examination_purpose,
-            purpose_description,
-            lab_name,
-            examiner_name,
-            p_auth};
+            req_number, p_case, examination_purpose, purpose_description,
+            lab_name, examiner_name, p_auth};
 
         const char *sql =
             "INSERT INTO public.Forensic_Lab_Requests "
@@ -184,34 +162,20 @@ namespace forensic
             "        false, NOW(), NOW()) "
             "RETURNING request_id;";
 
-        PGresult *res = PQexecParams(conn, sql,
-                                     7, nullptr, params, nullptr, nullptr, 0);
+        PGresult *res = PQexecParams(conn, sql, 7, nullptr, params, nullptr, nullptr, 0);
 
         if (PQresultStatus(res) != PGRES_TUPLES_OK)
         {
             Logger::error("forensic_repository: insertRequest failed");
-            Logger::error(PQresultErrorMessage(res));
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
 
         out_request_id = std::atoi(PQgetvalue(res, 0, 0));
         PQclear(res);
-
-        char msg[64];
-        std::snprintf(msg, sizeof(msg),
-                      "forensic_repository: Request %d created", out_request_id);
-        Logger::info(msg);
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // insertEvidenceLink
-    // DB Trigger 1 fires on this INSERT:
-    //   → UPDATE public.Evidence SET evidence_status = 'SENT_TO_LAB'
-    //      WHERE evidence_id = NEW.evidence_id
-    // This function NEVER updates Evidence directly.
-    // ============================================================================
     ResultCode ForensicRepository::insertEvidenceLink(
         PGconn *conn,
         int request_id,
@@ -221,7 +185,6 @@ namespace forensic
         char p0[16], p1[16];
         std::snprintf(p0, sizeof(p0), "%d", request_id);
         std::snprintf(p1, sizeof(p1), "%d", evidence_id);
-
         const char *params[3] = {p0, p1, notes ? notes : ""};
 
         const char *sql =
@@ -229,33 +192,17 @@ namespace forensic
             "  (request_id, evidence_id, notes, linked_at) "
             "VALUES ($1::int, $2::int, $3, NOW()) "
             "ON CONFLICT (request_id, evidence_id) DO NOTHING;";
-        // Composite PK — duplicate link is silently ignored.
-        // The trigger only fires on an actual INSERT (not DO NOTHING).
 
-        PGresult *res = PQexecParams(conn, sql,
-                                     3, nullptr, params, nullptr, nullptr, 0);
-
+        PGresult *res = PQexecParams(conn, sql, 3, nullptr, params, nullptr, nullptr, 0);
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: insertEvidenceLink failed");
-            Logger::error(PQresultErrorMessage(res));
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
-
         PQclear(res);
-        Logger::info("forensic_repository: Evidence linked — trigger will set SENT_TO_LAB");
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateStatus
-    // When new_status = 'REPORT_DELIVERED', DB Trigger 2 fires:
-    //   → UPDATE public.Evidence SET evidence_status = 'RETURNED_FROM_LAB'
-    //      WHERE evidence_id IN (SELECT evidence_id FROM Forensic_Request_Evidence
-    //                            WHERE request_id = NEW.request_id)
-    // This function NEVER updates Evidence directly.
-    // ============================================================================
     ResultCode ForensicRepository::updateStatus(
         PGconn *conn,
         int request_id,
@@ -263,7 +210,6 @@ namespace forensic
     {
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", request_id);
-
         const char *params[2] = {new_status, p0};
 
         const char *sql =
@@ -271,35 +217,21 @@ namespace forensic
             "SET request_status = $1, updated_at = NOW() "
             "WHERE request_id = $2::int;";
 
-        PGresult *res = PQexecParams(conn, sql,
-                                     2, nullptr, params, nullptr, nullptr, 0);
-
+        PGresult *res = PQexecParams(conn, sql, 2, nullptr, params, nullptr, nullptr, 0);
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateStatus failed");
-            Logger::error(PQresultErrorMessage(res));
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
-
         if (std::atoi(PQcmdTuples(res)) == 0)
         {
             PQclear(res);
-            Logger::debug("forensic_repository: updateStatus — request_id not found");
             return ResultCode::NOT_FOUND;
         }
-
-        char msg[80];
-        std::snprintf(msg, sizeof(msg),
-                      "forensic_repository: request %d → %s", request_id, new_status);
-        Logger::info(msg);
         PQclear(res);
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateReceivedDate  —  sets received_by_lab_date; called with REQUESTED→RECEIVED_BY_LAB
-    // ============================================================================
     ResultCode ForensicRepository::updateReceivedDate(
         PGconn *conn,
         int request_id,
@@ -315,10 +247,8 @@ namespace forensic
             "WHERE request_id = $2::int;";
 
         PGresult *res = PQexecParams(conn, sql, 2, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateReceivedDate failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
@@ -326,9 +256,6 @@ namespace forensic
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateExaminationStartDate  —  captures NOW() when examination starts
-    // ============================================================================
     ResultCode ForensicRepository::updateExaminationStartDate(
         PGconn *conn,
         int request_id)
@@ -343,10 +270,8 @@ namespace forensic
             "WHERE request_id = $1::int;";
 
         PGresult *res = PQexecParams(conn, sql, 1, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateExaminationStartDate failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
@@ -354,14 +279,6 @@ namespace forensic
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateFindings
-    // Sets findings, report_file_path, report_ready_date, and
-    // report_delivered_date in a single UPDATE.
-    // Called after the two-step REPORT_READY → REPORT_DELIVERED transition.
-    // DB Trigger 2 will fire when updateStatus is subsequently called with
-    // 'REPORT_DELIVERED', updating all linked evidence to RETURNED_FROM_LAB.
-    // ============================================================================
     ResultCode ForensicRepository::updateFindings(
         PGconn *conn,
         int request_id,
@@ -371,7 +288,6 @@ namespace forensic
     {
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", request_id);
-
         const char *params[4] = {findings, report_file_path, delivery_date, p0};
 
         const char *sql =
@@ -384,22 +300,15 @@ namespace forensic
             "WHERE request_id = $4::int;";
 
         PGresult *res = PQexecParams(conn, sql, 4, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateFindings failed");
-            Logger::error(PQresultErrorMessage(res));
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
         PQclear(res);
-        Logger::info("forensic_repository: Findings recorded");
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateAmendment  —  corrects findings text, does NOT change status
-    // ============================================================================
     ResultCode ForensicRepository::updateAmendment(
         PGconn *conn,
         int request_id,
@@ -415,21 +324,15 @@ namespace forensic
             "WHERE request_id = $2::int;";
 
         PGresult *res = PQexecParams(conn, sql, 2, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateAmendment failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
         PQclear(res);
-        Logger::info("forensic_repository: Findings amended");
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // updateContest  —  sets contestation fields, status transition is separate
-    // ============================================================================
     ResultCode ForensicRepository::updateContest(
         PGconn *conn,
         int request_id,
@@ -439,7 +342,6 @@ namespace forensic
         char p0[16], p1[16];
         std::snprintf(p0, sizeof(p0), "%d", contested_by);
         std::snprintf(p1, sizeof(p1), "%d", request_id);
-
         const char *params[3] = {contest_reason, p0, p1};
 
         const char *sql =
@@ -452,21 +354,15 @@ namespace forensic
             "WHERE request_id = $3::int;";
 
         PGresult *res = PQexecParams(conn, sql, 3, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_COMMAND_OK)
         {
-            Logger::error("forensic_repository: updateContest failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
         PQclear(res);
-        Logger::info("forensic_repository: Report contested");
         return ResultCode::OK;
     }
 
-    // ============================================================================
-    // selectByCase  —  all requests for a case, DESC
-    // ============================================================================
     ResultCode ForensicRepository::selectByCase(
         PGconn *conn,
         int case_id,
@@ -475,28 +371,18 @@ namespace forensic
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", case_id);
         const char *params[1] = {p0};
-
         char sql[2048];
         std::snprintf(sql, sizeof(sql),
-                      "%sWHERE flr.case_id = $1::int ORDER BY flr.created_at DESC;",
+                      "%s WHERE flr.case_id = $1::int ORDER BY flr.created_at DESC;",
                       kSelectCols);
 
         PGresult *res = PQexecParams(conn, sql, 1, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_TUPLES_OK)
         {
-            Logger::error("forensic_repository: selectByCase failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
-
         int n = PQntuples(res);
-        if (n == 0)
-        {
-            PQclear(res);
-            return ResultCode::NOT_FOUND;
-        }
-
         for (int i = 0; i < n; ++i)
         {
             ForensicRecord r;
@@ -504,12 +390,9 @@ namespace forensic
             out.push_back(r);
         }
         PQclear(res);
-        return ResultCode::OK;
+        return out.empty() ? ResultCode::NOT_FOUND : ResultCode::OK;
     }
 
-    // ============================================================================
-    // selectPending  —  non-delivered requests at a station
-    // ============================================================================
     ResultCode ForensicRepository::selectPending(
         PGconn *conn,
         int station_id,
@@ -518,32 +401,21 @@ namespace forensic
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", station_id);
         const char *params[1] = {p0};
-
         char sql[2048];
         std::snprintf(sql, sizeof(sql),
-                      "%s"
-                      "JOIN public.Cases c ON flr.case_id = c.case_id "
+                      "%s JOIN public.Cases c ON flr.case_id = c.case_id "
                       "WHERE c.station_id = $1::int "
-                      "  AND flr.request_status NOT IN ('REPORT_DELIVERED', 'CONTESTED') "
+                      "AND flr.request_status NOT IN ('REPORT_DELIVERED', 'CONTESTED') "
                       "ORDER BY flr.created_at ASC;",
                       kSelectCols);
 
         PGresult *res = PQexecParams(conn, sql, 1, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_TUPLES_OK)
         {
-            Logger::error("forensic_repository: selectPending failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
-
         int n = PQntuples(res);
-        if (n == 0)
-        {
-            PQclear(res);
-            return ResultCode::NOT_FOUND;
-        }
-
         for (int i = 0; i < n; ++i)
         {
             ForensicRecord r;
@@ -551,12 +423,9 @@ namespace forensic
             out.push_back(r);
         }
         PQclear(res);
-        return ResultCode::OK;
+        return out.empty() ? ResultCode::NOT_FOUND : ResultCode::OK;
     }
 
-    // ============================================================================
-    // selectEvidenceByRequest  —  JOIN Forensic_Request_Evidence with Evidence
-    // ============================================================================
     ResultCode ForensicRepository::selectEvidenceByRequest(
         PGconn *conn,
         int request_id,
@@ -565,35 +434,22 @@ namespace forensic
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", request_id);
         const char *params[1] = {p0};
-
         const char *sql =
-            "SELECT fre.evidence_id, fre.request_id, "
-            "       e.evidence_number, e.evidence_type, e.evidence_status, "
-            "       COALESCE(e.description, ''), "
-            "       COALESCE(fre.notes, ''), "
-            "       EXTRACT(EPOCH FROM fre.linked_at)::bigint "
+            "SELECT fre.evidence_id, fre.request_id, e.evidence_number, "
+            "e.evidence_type, e.evidence_status, COALESCE(e.description, ''), "
+            "COALESCE(fre.notes, ''), EXTRACT(EPOCH FROM fre.linked_at)::bigint "
             "FROM public.Forensic_Request_Evidence fre "
             "JOIN public.Evidence e ON fre.evidence_id = e.evidence_id "
-            "WHERE fre.request_id = $1::int "
-            "  AND e.is_deleted = false "
+            "WHERE fre.request_id = $1::int AND e.is_deleted = false "
             "ORDER BY fre.linked_at ASC;";
 
         PGresult *res = PQexecParams(conn, sql, 1, nullptr, params, nullptr, nullptr, 0);
-
         if (PQresultStatus(res) != PGRES_TUPLES_OK)
         {
-            Logger::error("forensic_repository: selectEvidenceByRequest failed");
             PQclear(res);
             return ResultCode::DB_ERROR;
         }
-
         int n = PQntuples(res);
-        if (n == 0)
-        {
-            PQclear(res);
-            return ResultCode::NOT_FOUND;
-        }
-
         for (int i = 0; i < n; ++i)
         {
             EvidenceRef e;
@@ -601,12 +457,9 @@ namespace forensic
             out.push_back(e);
         }
         PQclear(res);
-        return ResultCode::OK;
+        return out.empty() ? ResultCode::NOT_FOUND : ResultCode::OK;
     }
 
-    // ============================================================================
-    // fetchCurrentStatus  —  lightweight read used by ForensicManager before transitions
-    // ============================================================================
     ResultCode ForensicRepository::fetchCurrentStatus(
         PGconn *conn,
         int request_id,
@@ -616,32 +469,18 @@ namespace forensic
         char p0[16];
         std::snprintf(p0, sizeof(p0), "%d", request_id);
         const char *params[1] = {p0};
-
-        const char *sql =
-            "SELECT request_status, "
-            "       EXTRACT(EPOCH FROM received_by_lab_date)::bigint "
-            "FROM public.Forensic_Lab_Requests "
-            "WHERE request_id = $1::int;";
-
-        PGresult *res = PQexecParams(conn, sql, 1, nullptr, params, nullptr, nullptr, 0);
-
-        if (PQresultStatus(res) != PGRES_TUPLES_OK)
-        {
-            Logger::error("forensic_repository: fetchCurrentStatus failed");
-            PQclear(res);
-            return ResultCode::DB_ERROR;
-        }
-
-        if (PQntuples(res) == 0)
+        PGresult *res = PQexecParams(conn,
+                                     "SELECT request_status, EXTRACT(EPOCH FROM received_by_lab_date)::bigint "
+                                     "FROM public.Forensic_Lab_Requests WHERE request_id = $1::int;",
+                                     1, nullptr, params, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
         {
             PQclear(res);
             return ResultCode::NOT_FOUND;
         }
-
         _scopy(out_status, 24, PQgetvalue(res, 0, 0));
         out_receipt_epoch = _epoch(PQgetvalue(res, 0, 1));
         PQclear(res);
         return ResultCode::OK;
     }
-
 } // namespace forensic

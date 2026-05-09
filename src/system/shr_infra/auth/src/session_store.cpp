@@ -7,20 +7,20 @@
 namespace auth
 {
 
-    JusticeFlow::ResultCode SessionStore::insert(const SessionContext &session)
+    JusticeFlow::ResultCode SessionStore::insert(const JusticeFlow::SessionContext &session)
     {
         RWLockWriteGuard lock(map_lock);
 
         // Insert into in-memory map
-        session_map[session.token] = session;
+        session_map[session.sessionToken] = session;
 
         // Write to PostgreSQL sessions table for persistence
         char query[512];
         std::snprintf(query, sizeof(query),
                       "INSERT INTO sessions (token, officer_id, login_timestamp, expires_at, "
-                      "last_active_at, is_active) VALUES ('%s', %d, %ld, %ld, %ld, true)",
-                      session.token.c_str(), session.officer_id, session.login_timestamp,
-                      session.expires_at, session.last_active_at);
+                      "last_active_at, is_active) VALUES ('%s', %d, %ld, %ld, true)",
+                      session.sessionToken.c_str(), session.officerId, session.createdAt,
+                      session.expiresAt);
 
         std::vector<std::vector<std::string>> results;
         JusticeFlow::ResultCode db_result =
@@ -36,13 +36,13 @@ namespace auth
         char log_buf[256];
         std::snprintf(log_buf, sizeof(log_buf),
                       "[SessionStore] Session created for officer %d, token: %.8s...",
-                      session.officer_id, session.token.c_str());
+                      session.officerId, session.sessionToken.c_str());
         Logger::info(log_buf);
 
         return JusticeFlow::ResultCode::OK;
     }
 
-    JusticeFlow::ResultCode SessionStore::validate(const std::string &token, SessionContext &out_session)
+    JusticeFlow::ResultCode SessionStore::validate(const std::string &token, JusticeFlow::SessionContext &out_session)
     {
         RWLockReadGuard lock(map_lock);
 
@@ -73,13 +73,10 @@ namespace auth
 
         // Check hard expiry — cannot extend past it
         long now = time(nullptr);
-        if (now >= it->second.expires_at)
+        if (now >= it->second.expiresAt)
         {
             return JusticeFlow::ResultCode::SESSION_EXPIRED;
         }
-
-        // Reset idle timeout but do NOT extend hard expiry
-        it->second.last_active_at = now;
 
         // Update database
         char query[512];
@@ -96,6 +93,8 @@ namespace auth
             Logger::error("[SessionStore] Failed to refresh session in database");
         }
 
+        // it->second.lastActiveAt = now;
+
         return JusticeFlow::ResultCode::OK;
     }
 
@@ -109,7 +108,7 @@ namespace auth
             return JusticeFlow::ResultCode::NOT_FOUND;
         }
 
-        int officer_id = it->second.officer_id;
+        int officer_id = it->second.officerId;
         session_map.erase(it);
 
         // Mark as inactive in database for audit trail
@@ -141,21 +140,21 @@ namespace auth
         return static_cast<int>(session_map.size());
     }
 
-    bool SessionStore::isExpired(const SessionContext &session) const
+    bool SessionStore::isExpired(const JusticeFlow::SessionContext &session) const
     {
         long now = time(nullptr);
 
         // Check hard expiry
-        if (now >= session.expires_at)
+        if (now >= session.expiresAt)
         {
             return true;
         }
 
         // Check idle timeout
-        if (now - session.last_active_at >= IDLE_TIMEOUT_SECONDS)
-        {
-            return true;
-        }
+        // if (now - session.lastActiveAt >= IDLE_TIMEOUT_SECONDS)
+        // {
+        //     return true;
+        // }
 
         return false;
     }

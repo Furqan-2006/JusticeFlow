@@ -4,13 +4,15 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <memory>
+
 #include <iostream>
 
 // Include main headers
-#include "system.h"
+#include "../src/system/system.h"
 #include "common/common.h"
 #include "common/constants.h"
-#include "interface/cli.h"
+#include "common/dbconfig.h"
+#include "../src/interface/cli.h"
 
 /**
  * @brief Base fixture for all JusticeFlow tests

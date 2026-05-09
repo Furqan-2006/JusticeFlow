@@ -214,9 +214,10 @@ namespace forensic
         {
             char p0[16];
             std::snprintf(p0, sizeof(p0), "%d", case_id);
+            const char *paramValues[1] = {p0};
             PGresult *res = PQexecParams(conn,
                                          "SELECT case_status FROM public.Cases WHERE case_id = $1::int;",
-                                         1, nullptr, (const char *[]){p0}, nullptr, nullptr, 0);
+                                         1, nullptr, paramValues, nullptr, nullptr, 0);
 
             if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
             {
@@ -315,10 +316,11 @@ namespace forensic
         {
             char p0[16];
             std::snprintf(p0, sizeof(p0), "%d", evidence_id);
+            const char *paramValues[1] = {p0};
             PGresult *res = PQexecParams(conn,
                                          "SELECT is_deleted, evidence_status, case_id "
                                          "FROM public.Evidence WHERE evidence_id = $1::int;",
-                                         1, nullptr, (const char *[]){p0}, nullptr, nullptr, 0);
+                                         1, nullptr, paramValues, nullptr, nullptr, 0);
 
             if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
             {
@@ -358,9 +360,10 @@ namespace forensic
             {
                 char p1[16];
                 std::snprintf(p1, sizeof(p1), "%d", request_id);
+                const char *paramValues2[1] = {p1};
                 PGresult *r2 = PQexecParams(conn,
                                             "SELECT case_id FROM public.Forensic_Lab_Requests WHERE request_id = $1::int;",
-                                            1, nullptr, (const char *[]){p1}, nullptr, nullptr, 0);
+                                            1, nullptr, paramValues2, nullptr, nullptr, 0);
 
                 if (PQresultStatus(r2) != PGRES_TUPLES_OK || PQntuples(r2) == 0)
                 {

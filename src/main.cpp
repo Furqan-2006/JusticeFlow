@@ -1,9 +1,9 @@
 // src/main.cpp
 #include "main.h"
-#include "system.h"
-#include "api_gateway.h"
-#include "cli.h"
-#include "logger.h"
+#include "system/system.h"
+#include "api_gateway/include/api_gateway.h"
+#include "interface/cli.h"
+#include "common/logger.h"
 #include "common/constants.h"
 
 #include <iostream>
@@ -73,15 +73,16 @@ public:
             Logger::info("Phase 1: Initializing SystemManager...");
 
             system_layer::SystemInitConfig sys_config;
-            sys_config.audit_db_conninfo = m_db_config.toConnectionString().c_str();
+            
+            std::string conn_str = m_db_config.toConnectionString();
+            sys_config.audit_db_conninfo = conn_str.c_str();
 
             auto &sys_mgr = system_layer::SystemManager::getInstance();
             auto init_result = sys_mgr.init(sys_config);
 
             if (!init_result.ok())
             {
-                Logger::error("SystemManager initialization failed: code=%d",
-                              static_cast<int>(init_result.code));
+                Logger::error("SystemManager initialization failed");
                 return false;
             }
 
@@ -100,11 +101,11 @@ public:
 
             if (api_rc != JusticeFlow::ResultCode::OK)
             {
-                Logger::error("API Gateway startup failed: code=%d", static_cast<int>(api_rc));
+                Logger::error(std::string(("API Gateway startup failed: code=" + std::to_string(static_cast<int>(api_rc)))).c_str());
                 return false;
             }
 
-            Logger::info("✓ API Gateway listening on %s", api_cfg.socket_path.c_str());
+            Logger::info(std::string(("✓ API Gateway listening on " + api_cfg.socket_path)).c_str());
 
             // ================================================================
             // PHASE 3: CLI is ready (but not started yet)
@@ -116,7 +117,7 @@ public:
         }
         catch (const std::exception &e)
         {
-            Logger::error("Initialization exception: %s", e.what());
+            Logger::error(std::string(("Initialization exception: " + std::string(e.what()))).c_str());
             return false;
         }
     }
@@ -142,7 +143,7 @@ public:
         }
         catch (const std::exception &e)
         {
-            Logger::error("CLI execution exception: %s", e.what());
+            Logger::error(std::string(("CLI execution exception: " + std::string(e.what()))).c_str());
             return 1;
         }
     }
@@ -190,7 +191,7 @@ void handle_sigint(int sig)
 {
     if (g_orchestrator)
     {
-        Logger::warn("Received SIGINT, shutting down gracefully...");
+        Logger::info("Received SIGINT, shutting down gracefully...");
         g_orchestrator->shutdown();
     }
     exit(0);
@@ -200,7 +201,7 @@ void handle_sigterm(int sig)
 {
     if (g_orchestrator)
     {
-        Logger::warn("Received SIGTERM, shutting down gracefully...");
+        Logger::info("Received SIGTERM, shutting down gracefully...");
         g_orchestrator->shutdown();
     }
     exit(0);
@@ -322,8 +323,7 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        Logger::info("✓ Database configured: host=%s, db=%s, user=%s",
-                     db_config.host.c_str(), db_config.dbname.c_str(), db_config.user.c_str());
+        Logger::info(std::string(("✓ Database configured: host=" + db_config.host + ", db=" + db_config.dbname + ", user=" + db_config.user)).c_str());
 
         // ====================================================================
         // PHASE 4: CREATE ORCHESTRATOR
@@ -389,7 +389,7 @@ int main(int argc, char *argv[])
     }
     catch (const std::exception &e)
     {
-        Logger::error("FATAL ERROR: %s", e.what());
+        Logger::error(std::string(("FATAL ERROR: " + std::string(e.what()))).c_str());
         return 1;
     }
     catch (...)

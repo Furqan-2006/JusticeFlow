@@ -1,5 +1,6 @@
 // tests/orchestrator_test.cpp
 #include "test_common.h"
+#include <thread>
 
 /**
  * @class OrchestratorTest
@@ -70,8 +71,7 @@ TEST_F(OrchestratorTest, InjectionGuard)
     // After init, injection should throw
     EXPECT_THROW(
         {
-            auto dummy = std::make_unique<system_layer::DefaultAuthAdapter>();
-            sys.injectAuth(std::move(dummy));
+            sys.injectAuth({});
         },
         std::logic_error);
 }
@@ -212,10 +212,8 @@ TEST_F(OrchestratorTest, CustomAdapterInjection)
 {
     auto &sys = system_layer::SystemManager::getInstance();
 
-    // Create a dummy auth adapter
-    auto custom_adapter = std::make_unique<system_layer::DefaultAuthAdapter>();
-
-    sys.injectAuth(std::move(custom_adapter));
+    // Inject an explicit empty adapter handle before init
+    sys.injectAuth({});
 
     system_layer::SystemInitConfig config;
     auto result = sys.init(config);

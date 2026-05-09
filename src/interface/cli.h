@@ -7,10 +7,12 @@
 #include <functional>
 #include <memory>
 #include <iostream>
+#include <chrono>
 
 #include "common/common.h"
-#include "system.h"
-#include "api_gateway.h"
+#include "common/dbconfig.h"
+#include "../src/system/system.h"
+#include "../src/api_gateway/include/api_gateway.h"
 
 namespace cli_interface
 {

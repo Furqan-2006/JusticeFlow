@@ -36,7 +36,7 @@ namespace cli_interface
         m_db_conn = PQconnectdb(db_config.toConnectionString().c_str());
         if (PQstatus(m_db_conn) != CONNECTION_OK)
         {
-            Logger::error("[CLI] Database connection failed: %s", PQerrorMessage(m_db_conn));
+            Logger::error((std::string("[CLI] Database connection failed: ") + PQerrorMessage(m_db_conn)).c_str());
             PQfinish(m_db_conn);
             m_db_conn = nullptr;
             throw std::runtime_error("Failed to connect to database");
@@ -162,14 +162,15 @@ namespace cli_interface
             }
 
             // Log command for audit
-            Logger::info("[CLI] Command: %s (user: %s)", input.c_str(),
-                         m_context.username.empty() ? "guest" : m_context.username.c_str());
+            Logger::info((std::string("[CLI] Command: ") + input + " (user: " +
+                          (m_context.username.empty() ? "guest" : m_context.username) + ")")
+                             .c_str());
 
             return dispatchCommand(tokens);
         }
         catch (const std::exception &e)
         {
-            Logger::error("[CLI] Exception executing command: %s", e.what());
+            Logger::error((std::string("[CLI] Exception executing command: ") + e.what()).c_str());
             return CommandResult::error(std::string("Internal error: ") + e.what());
         }
     }
@@ -314,7 +315,7 @@ namespace cli_interface
         auto login_result = m_system.auth().login(cnic.c_str(), password.c_str());
         if (!login_result.ok())
         {
-            Logger::warn("[CLI] Login failed for CNIC: %s", cnic.c_str());
+            Logger::error("[CLI] Login failed for CNIC");
             return CommandResult::error("Authentication failed");
         }
 
@@ -333,21 +334,24 @@ namespace cli_interface
         m_context.rank = session_result.value.rank;
         m_context.login_time = std::chrono::system_clock::now();
 
-        Logger::info("[CLI] User logged in: CNIC=%s, Officer=%d, Rank=%d",
-                     cnic.c_str(), m_context.officer_id, static_cast<int>(m_context.rank));
+        Logger::info((std::string("[CLI] User logged in: CNIC=") + cnic + ", Officer=" +
+                      std::to_string(m_context.officer_id) + ", Rank=" +
+                      std::to_string(static_cast<int>(m_context.rank)))
+                         .c_str());
 
         return CommandResult::ok("Login successful");
     }
 
     CommandResult CLIInterface::handleLogoutCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         if (!m_context.isLoggedIn())
         {
             return CommandResult::error("Not logged in");
         }
 
         // Call auth layer to invalidate token
-        auto logout_result = m_system.auth().logout(m_context.session_token.c_str());
+        (void)m_system.auth().logout(m_context.session_token.c_str());
 
         // Clear context regardless of logout success
         m_context.officer_id = -1;
@@ -362,6 +366,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleWhoamiCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         if (!m_context.isLoggedIn())
         {
             return CommandResult::ok("Not logged in");
@@ -510,16 +515,19 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleCaseUpdateCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Case update placeholder (feature in progress)");
     }
 
     CommandResult CLIInterface::handleCaseCloseCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Case close placeholder (feature in progress)");
     }
 
     CommandResult CLIInterface::handleCaseReopenCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Case reopen placeholder (feature in progress)");
     }
 
@@ -538,16 +546,19 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleEvidenceListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Evidence list placeholder");
     }
 
     CommandResult CLIInterface::handleEvidenceAddCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Evidence add placeholder");
     }
 
     CommandResult CLIInterface::handleEvidenceViewCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Evidence view placeholder");
     }
 
@@ -557,26 +568,31 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleWarrantCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Warrant command placeholder");
     }
 
     CommandResult CLIInterface::handleWarrantListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Warrant list placeholder");
     }
 
     CommandResult CLIInterface::handleWarrantIssueCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Warrant issue placeholder");
     }
 
     CommandResult CLIInterface::handleWarrantServeCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Warrant serve placeholder");
     }
 
     CommandResult CLIInterface::handleWarrantRevokeCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Warrant revoke placeholder");
     }
 
@@ -586,21 +602,25 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleArrestCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Arrest command placeholder");
     }
 
     CommandResult CLIInterface::handleArrestListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Arrest list placeholder");
     }
 
     CommandResult CLIInterface::handleArrestRegisterCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Arrest register placeholder");
     }
 
     CommandResult CLIInterface::handleArrestReleaseCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Arrest release placeholder");
     }
 
@@ -610,26 +630,31 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleBailCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Bail command placeholder");
     }
 
     CommandResult CLIInterface::handleBailListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Bail list placeholder");
     }
 
     CommandResult CLIInterface::handleBailApplyCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Bail apply placeholder");
     }
 
     CommandResult CLIInterface::handleBailApproveCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Bail approve placeholder");
     }
 
     CommandResult CLIInterface::handleBailDenyCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Bail deny placeholder");
     }
 
@@ -639,16 +664,19 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleForensicCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Forensic command placeholder");
     }
 
     CommandResult CLIInterface::handleForensicListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Forensic list placeholder");
     }
 
     CommandResult CLIInterface::handleForensicCreateCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Forensic create placeholder");
     }
 
@@ -658,16 +686,19 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleAuditCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Audit command placeholder");
     }
 
     CommandResult CLIInterface::handleAuditQueryCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Audit query placeholder");
     }
 
     CommandResult CLIInterface::handleAuditExportCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Audit export placeholder");
     }
 
@@ -677,16 +708,19 @@ namespace cli_interface
 
     CommandResult CLIInterface::handlePersonnelCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Personnel command placeholder");
     }
 
     CommandResult CLIInterface::handlePersonnelListCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Personnel list placeholder");
     }
 
     CommandResult CLIInterface::handlePersonnelViewCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Personnel view placeholder");
     }
 
@@ -696,26 +730,31 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleDutyCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Duty command placeholder");
     }
 
     CommandResult CLIInterface::handleDutyScheduleCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Duty schedule placeholder");
     }
 
     CommandResult CLIInterface::handleDutyStartCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Duty start placeholder");
     }
 
     CommandResult CLIInterface::handleDutyEndCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Duty end placeholder");
     }
 
     CommandResult CLIInterface::handleDutyRosterCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Duty roster placeholder");
     }
 
@@ -750,6 +789,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleHealthCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         return CommandResult::ok("Health check placeholder");
     }
 

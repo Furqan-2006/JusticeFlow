@@ -38,6 +38,7 @@ namespace JusticeFlow
 
     bool SHOStrategy::can_close_case(CaseType type)
     {
+        (void)type;
         return true; // Full jurisdictional authority
     }
 

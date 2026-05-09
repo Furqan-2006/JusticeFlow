@@ -12,6 +12,7 @@ namespace auth
     // Forward declarations for private connection management
     // (Not exposed in header)
     static std::unique_ptr<ipc::UnixSocket> createAuthConnection();
+    static bool parseOfficerRank(const std::string &rank, JusticeFlow::OfficerRank &out_rank);
 
     // ============================================================================
     // Implementation
@@ -73,6 +74,12 @@ namespace auth
         // Extract officer_id and rank
         int officer_id = std::stoi(results[0][0]);
         std::string rank = results[0][1];
+        JusticeFlow::OfficerRank officer_rank;
+        if (!parseOfficerRank(rank, officer_rank))
+        {
+            Logger::error("[AuthManager] Unknown rank returned from database");
+            return JusticeFlow::ResultCode::INVALID_STATE;
+        }
 
         // Generate session token
         std::string token = token_generator::generate();
@@ -86,11 +93,9 @@ namespace auth
         long now = time(nullptr);
         out_session.sessionToken = token;
         out_session.officerId = officer_id;
-        out_session.rank = rank;
-        out_session.login_timestamp = now;
-        out_session.expires_at = now + (8 * 3600); // 8 hours from now
-        out_session.last_active_at = now;
-        out_session.is_duty_active = false; // Will be populated on first check
+        out_session.rank = officer_rank;
+        out_session.createdAt = now;
+        out_session.expiresAt = now + (8 * 3600); // 8 hours from now
 
         // Insert into session store
         JusticeFlow::ResultCode insert_result = session_store->insert(out_session);
@@ -147,7 +152,7 @@ namespace auth
             char log_buf[128];
             std::snprintf(log_buf, sizeof(log_buf),
                           "[AuthManager] Officer %d rank insufficient: %d < %d",
-                          session.officer_id, rank_value, minimum_rank);
+                          session.officerId, rank_value, minimum_rank);
             Logger::error(log_buf);
             return JusticeFlow::ResultCode::RANK_INSUFFICIENT;
         }
@@ -160,24 +165,19 @@ namespace auth
 
     JusticeFlow::ResultCode AuthManager::refreshSession(JusticeFlow::SessionContext &session)
     {
-        JusticeFlow::ResultCode result = session_store->refresh(session.token);
-        if (result == JusticeFlow::ResultCode::OK)
-        {
-            // Update the session object's last_active_at timestamp
-            session.last_active_at = time(nullptr);
-        }
+        JusticeFlow::ResultCode result = session_store->refresh(session.sessionToken);
         return result;
     }
 
     JusticeFlow::ResultCode AuthManager::logout(const JusticeFlow::SessionContext &session)
     {
-        JusticeFlow::ResultCode result = session_store->remove(session.token);
+        JusticeFlow::ResultCode result = session_store->remove(session.sessionToken);
 
         if (result == JusticeFlow::ResultCode::OK)
         {
             char log_buf[128];
             std::snprintf(log_buf, sizeof(log_buf),
-                          "[AuthManager] Officer %d logged out", session.officer_id);
+                          "[AuthManager] Officer %d logged out", session.officerId);
             Logger::info(log_buf);
         }
 
@@ -192,6 +192,32 @@ namespace auth
     // ============================================================================
     // Private helper — create dedicated DB connection for auth
     // ============================================================================
+
+    static bool parseOfficerRank(const std::string &rank, JusticeFlow::OfficerRank &out_rank)
+    {
+        if (rank == "CONSTABLE")
+        {
+            out_rank = JusticeFlow::OfficerRank::CONSTABLE;
+            return true;
+        }
+        if (rank == "INSPECTOR")
+        {
+            out_rank = JusticeFlow::OfficerRank::INSPECTOR;
+            return true;
+        }
+        if (rank == "SI")
+        {
+            out_rank = JusticeFlow::OfficerRank::SI;
+            return true;
+        }
+        if (rank == "DSP")
+        {
+            out_rank = JusticeFlow::OfficerRank::DSP;
+            return true;
+        }
+
+        return false;
+    }
 
     static std::unique_ptr<ipc::UnixSocket> createAuthConnection()
     {
