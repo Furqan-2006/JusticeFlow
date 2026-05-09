@@ -200,130 +200,6 @@ namespace system_layer
     public:
         virtual ~ISubsystem1Adapter() = default;
 
-        // ── Case CRUD ─────────────────────────────────────────────────────────────
-
-        /** @return out_case_id on success. */
-        virtual SystemResult<int> registerCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            JusticeFlow::CaseType case_type, time_t incident_date,
-            const char *incident_address, const char *description,
-            double lat, double lon, int station_id,
-            const char *complainant_cnic) = 0;
-
-        virtual SystemResult<JusticeFlow::Case> getCaseById(
-            PGconn *conn, int case_id) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(
-            PGconn *conn, int station_id) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(
-            PGconn *conn, int station_id, JusticeFlow::CaseStatus) = 0;
-
-        // ── Status Transitions ────────────────────────────────────────────────────
-
-        virtual SystemResult<void> updateCaseStatus(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, JusticeFlow::CaseStatus, const char *reason) = 0;
-
-        virtual SystemResult<void> closeCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *reason) = 0;
-
-        virtual SystemResult<void> reopenCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *reason) = 0;
-
-        virtual SystemResult<void> transferCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int to_station_id, const char *reason) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Officer Assignment ────────────────────────────────────────────────────
-
-        virtual SystemResult<void> assignOfficerToCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id, JusticeFlow::CaseOfficerRole) = 0;
-
-        virtual SystemResult<void> relieveOfficerFromCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Complainants ──────────────────────────────────────────────────────────
-
-        /** @return out_complainant_id on success. */
-        virtual SystemResult<int> addComplainant(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::RelationshipToVictim, bool notify_on_update) = 0;
-
-        virtual SystemResult<void> updateComplainantStatus(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int complainant_id, JusticeFlow::ComplainantStatus,
-            const char *reason) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Victims ───────────────────────────────────────────────────────────────
-
-        /** @return out_victim_id on success. */
-        virtual SystemResult<int> addVictim(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *injury_type, JusticeFlow::InjurySeverity,
-            JusticeFlow::VulnerabilityCategory,
-            const char *medical_report_ref) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Witnesses ─────────────────────────────────────────────────────────────
-
-        /** @return out_witness_id on success. */
-        virtual SystemResult<int> addWitness(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            const char *statement_text, const char *statement_file_path,
-            JusticeFlow::WitnessProtection, bool conceal_identity) = 0;
-
-        virtual SystemResult<void> updateWitnessProtection(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int witness_id, JusticeFlow::WitnessProtection) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Accused ───────────────────────────────────────────────────────────────
-
-        /** @return out_accused_id on success. */
-        virtual SystemResult<int> addAccused(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *person_cnic,
-            JusticeFlow::InvolvementType) = 0;
-
-        virtual SystemResult<void> linkAccusedAssociation(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int accused_id, int associated_accused_id,
-            JusticeFlow::AssociationType) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(
-            PGconn *conn, int case_id) = 0;
-
-        // ── Vehicles ──────────────────────────────────────────────────────────────
-
-        virtual SystemResult<void> linkVehicleToCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int vehicle_id,
-            JusticeFlow::VehicleRole, const char *condition_notes) = 0;
-
-        virtual SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(
-            PGconn *conn, int case_id) = 0;
-
         // ── Duty Scheduling ───────────────────────────────────────────────────────
 
         /** @return out_duty_id on success. */
@@ -708,6 +584,7 @@ namespace system_layer
 
     private:
         ISubsystem1Adapter *s1_;
+        ISubsystem1Adapter *s2_;
     };
 
     // -----------------------------------------------------------------------------
