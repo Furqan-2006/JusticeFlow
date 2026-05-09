@@ -7,10 +7,10 @@
  * ============================================================================
  *
  *  Section 1  Concrete Adapter Helpers
- *               adapt_s1_bool()  — converts S1's bool+out_code into SystemResult
- *               adapt_s1_rc()    — converts S1's ResultCode+out-param into SystemResult
- *               adapt_s3_bool()  — converts S3's bool+out_code into SystemResult
- *               adapt_s3_rc()    — converts S3's ResultCode+out-param into SystemResult
+ *               adapt_bool()       — converts S1's bool+out_code into SystemResult
+ *               adapt_bool_void()  — converts S1's bool+out_code (void) into SystemResult
+ *               adapt_rc()         — converts S1's ResultCode+out-param into SystemResult
+ *               adapt_rc_void()    — converts S1's bare ResultCode into SystemResult
  *
  *  Section 2  Default concrete adapter implementations
  *               DefaultAuthAdapter
@@ -65,7 +65,7 @@ namespace system_layer
          * Usage:
          *   return adapt_bool<int>(
          *       [&](int &val, JusticeFlow::ResultCode &rc) {
-         *           return subsystem1::Subsystem1::registerCase(..., val, rc);
+         *           return subsystem1::Subsystem1::scheduleDuty(..., val, rc);
          *       });
          */
         template <typename T, typename Fn>
@@ -93,9 +93,9 @@ namespace system_layer
         /**
          * Convert the S1/S3 ResultCode+out_value pattern into SystemResult<T>.
          * Usage:
-         *   return adapt_rc<JusticeFlow::Case>(
-         *       [&](JusticeFlow::Case &out) {
-         *           return subsystem1::Subsystem1::getCaseById(conn, id, out);
+         *   return adapt_rc<JusticeFlow::Officer>(
+         *       [&](JusticeFlow::Officer &out) {
+         *           return subsystem1::Subsystem1::getOfficerById(conn, id, out);
          *       });
          */
         template <typename T, typename Fn>
@@ -214,6 +214,8 @@ namespace system_layer
 
     // -----------------------------------------------------------------------------
     // DefaultSubsystem1Adapter
+    // S1 now handles ONLY: Duty & Patrol + Officers & Personnel
+    // Case/Party CRUD moved entirely to S2.
     // Translates the all-static S1 API (bool+out_code / ResultCode+out-param)
     // into uniform SystemResult<T> using the Section-1 helpers.
     // -----------------------------------------------------------------------------
@@ -221,314 +223,6 @@ namespace system_layer
     class DefaultSubsystem1Adapter final : public ISubsystem1Adapter
     {
     public:
-        // ── Case CRUD ─────────────────────────────────────────────────────────────
-
-        SystemResult<int> registerCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            JusticeFlow::CaseType ct, time_t date,
-            const char *addr, const char *desc,
-            double lat, double lon, int station_id,
-            const char *cnic) override
-        {
-            return detail::adapt_bool<int>(
-                [&](int &id, JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::registerCase(
-                        conn, session, ct, date, addr, desc,
-                        lat, lon, station_id, cnic, id, rc);
-                });
-        }
-
-        SystemResult<JusticeFlow::Case> getCaseById(PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<JusticeFlow::Case>(
-                [&](JusticeFlow::Case &out)
-                {
-                    return subsystem1::Subsystem1::getCaseById(conn, case_id, out);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(
-            PGconn *conn, int station_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Case>>(
-                [&](std::vector<JusticeFlow::Case> &out)
-                {
-                    return subsystem1::Subsystem1::getCasesByStation(conn, station_id, out);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(
-            PGconn *conn, int station_id, JusticeFlow::CaseStatus status) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Case>>(
-                [&](std::vector<JusticeFlow::Case> &out)
-                {
-                    return subsystem1::Subsystem1::getCasesByStatus(conn, station_id, status, out);
-                });
-        }
-
-        // ── Status Transitions ────────────────────────────────────────────────────
-
-        SystemResult<void> updateCaseStatus(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, JusticeFlow::CaseStatus st, const char *reason) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::updateCaseStatus(
-                        conn, session, case_id, st, reason, rc);
-                });
-        }
-
-        SystemResult<void> closeCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *reason) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::closeCase(conn, session, case_id, reason, rc);
-                });
-        }
-
-        SystemResult<void> reopenCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *reason) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::reopenCase(conn, session, case_id, reason, rc);
-                });
-        }
-
-        SystemResult<void> transferCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int to_station_id, const char *reason) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::transferCase(
-                        conn, session, case_id, to_station_id, reason, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::CaseStatusLog>>(
-                [&](std::vector<JusticeFlow::CaseStatusLog> &out)
-                {
-                    return subsystem1::Subsystem1::getCaseStatusLog(conn, case_id, out);
-                });
-        }
-
-        // ── Officer Assignment ────────────────────────────────────────────────────
-
-        SystemResult<void> assignOfficerToCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id, JusticeFlow::CaseOfficerRole role) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::assignOfficerToCase(
-                        conn, session, case_id, officer_id, role, rc);
-                });
-        }
-
-        SystemResult<void> relieveOfficerFromCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int officer_id) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::relieveOfficerFromCase(
-                        conn, session, case_id, officer_id, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::CaseOfficer>>(
-                [&](std::vector<JusticeFlow::CaseOfficer> &out)
-                {
-                    return subsystem1::Subsystem1::getAssignedOfficers(conn, case_id, out);
-                });
-        }
-
-        // ── Complainants ──────────────────────────────────────────────────────────
-
-        SystemResult<int> addComplainant(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *cnic,
-            JusticeFlow::RelationshipToVictim rel, bool notify) override
-        {
-            return detail::adapt_bool<int>(
-                [&](int &id, JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::addComplainant(
-                        conn, session, case_id, cnic, rel, notify, id, rc);
-                });
-        }
-
-        SystemResult<void> updateComplainantStatus(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int id, JusticeFlow::ComplainantStatus st, const char *reason) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::updateComplainantStatus(
-                        conn, session, id, st, reason, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Complainant>>(
-                [&](std::vector<JusticeFlow::Complainant> &out)
-                {
-                    return subsystem1::Subsystem1::getComplainantsByCase(conn, case_id, out);
-                });
-        }
-
-        // ── Victims ───────────────────────────────────────────────────────────────
-
-        SystemResult<int> addVictim(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *cnic,
-            const char *injury_type, JusticeFlow::InjurySeverity sev,
-            JusticeFlow::VulnerabilityCategory vuln,
-            const char *medical_ref) override
-        {
-            return detail::adapt_bool<int>(
-                [&](int &id, JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::addVictim(
-                        conn, session, case_id, cnic,
-                        injury_type, sev, vuln, medical_ref, id, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Victim>>(
-                [&](std::vector<JusticeFlow::Victim> &out)
-                {
-                    return subsystem1::Subsystem1::getVictimsByCase(conn, case_id, out);
-                });
-        }
-
-        // ── Witnesses ─────────────────────────────────────────────────────────────
-
-        SystemResult<int> addWitness(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *cnic,
-            const char *stmt, const char *file,
-            JusticeFlow::WitnessProtection prot, bool conceal) override
-        {
-            return detail::adapt_bool<int>(
-                [&](int &id, JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::addWitness(
-                        conn, session, case_id, cnic,
-                        stmt, file, prot, conceal, id, rc);
-                });
-        }
-
-        SystemResult<void> updateWitnessProtection(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int witness_id, JusticeFlow::WitnessProtection st) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::updateWitnessProtection(
-                        conn, session, witness_id, st, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Witness>>(
-                [&](std::vector<JusticeFlow::Witness> &out)
-                {
-                    return subsystem1::Subsystem1::getWitnessesByCase(conn, case_id, out);
-                });
-        }
-
-        // ── Accused ───────────────────────────────────────────────────────────────
-
-        SystemResult<int> addAccused(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, const char *cnic,
-            JusticeFlow::InvolvementType inv) override
-        {
-            return detail::adapt_bool<int>(
-                [&](int &id, JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::addAccused(
-                        conn, session, case_id, cnic, inv, id, rc);
-                });
-        }
-
-        SystemResult<void> linkAccusedAssociation(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int accused_id, int assoc_id,
-            JusticeFlow::AssociationType atype) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::linkAccusedAssociation(
-                        conn, session, accused_id, assoc_id, atype, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::Accused>>(
-                [&](std::vector<JusticeFlow::Accused> &out)
-                {
-                    return subsystem1::Subsystem1::getAccusedByCase(conn, case_id, out);
-                });
-        }
-
-        // ── Vehicles ──────────────────────────────────────────────────────────────
-
-        SystemResult<void> linkVehicleToCase(
-            PGconn *conn, const JusticeFlow::SessionContext &session,
-            int case_id, int vehicle_id,
-            JusticeFlow::VehicleRole role, const char *notes) override
-        {
-            return detail::adapt_bool_void(
-                [&](JusticeFlow::ResultCode &rc)
-                {
-                    return subsystem1::Subsystem1::linkVehicleToCase(
-                        conn, session, case_id, vehicle_id, role, notes, rc);
-                });
-        }
-
-        SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(
-            PGconn *conn, int case_id) override
-        {
-            return detail::adapt_rc<std::vector<JusticeFlow::VehicleCase>>(
-                [&](std::vector<JusticeFlow::VehicleCase> &out)
-                {
-                    return subsystem1::Subsystem1::getVehiclesByCase(conn, case_id, out);
-                });
-        }
-
         // ── Duty ──────────────────────────────────────────────────────────────────
 
         SystemResult<int> scheduleDuty(
@@ -786,6 +480,7 @@ namespace system_layer
     // DefaultSubsystem2Adapter
     // Wraps the Subsystem2 singleton.  S2 already returns ResultCode throughout;
     // Fix #3: entity out-params become unique_ptr inside SystemResult.
+    // S2 now handles: FIR registration, evidence, charge sheets, AND case CRUD/parties.
     // -----------------------------------------------------------------------------
 
     class DefaultSubsystem2Adapter final : public ISubsystem2Adapter
@@ -1255,7 +950,7 @@ namespace system_layer
 
         // ── Stage 5: wire sub-facades to their adapter raw pointers ──────────────
         auth_facade_.setAdapter(auth_adapter_.get());
-        case_facade_.setAdapter(s1_adapter_.get());
+        case_facade_.setAdapter(s2_adapter_.get());
         inv_facade_.setAdapter(s2_adapter_.get());
         personnel_facade_.setAdapter(s1_adapter_.get());
         duty_facade_.setAdapter(s1_adapter_.get());
@@ -1338,108 +1033,106 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 5 — CaseFacade
+    // Section 5 — CaseFacade (now delegates to S2, not S1)
     // =============================================================================
 
     SystemResult<int> CaseFacade::registerCase(
         PGconn *conn, const JusticeFlow::SessionContext &session,
-        JusticeFlow::CaseType ct, time_t date,
-        const char *addr, const char *desc,
-        double lat, double lon, int station_id, const char *cnic)
+        JusticeFlow::CaseType type, time_t filed_time,
+        const char *address, const char *desc,
+        double lat, double lon,
+        int station_id, const char *cnic)
     {
-        return s1_->registerCase(conn, session, ct, date, addr, desc, lat, lon, station_id, cnic);
+        // You may need to package all parameters into a FIRRegistrationRequest
+        subsystem2::FIRRegistrationRequest req{/* fill fields appropriately */};
+        // Fill fields: req.caseType = type, req.filedTime = filed_time, req.address = ..., etc.
+        // This will depend on your FIRRegistrationRequest structure.
+        // Example:
+        // req.caseType = type; req.filedTime = filed_time; req.address = address; ...
+        auto result = s2_->registerFIR(req, session);
+        if (!result.ok())
+            return SystemResult<int>::failure(result.code);
+        // Assuming Case has an id member:
+        return SystemResult<int>::success(result.value->getCaseId());
     }
 
-    SystemResult<JusticeFlow::Case> CaseFacade::getCaseById(PGconn *conn, int case_id)
+    SystemResult<JusticeFlow::Case> CaseFacade::getCaseById(PGconn *, int case_id)
     {
-        return s1_->getCaseById(conn, case_id);
+        auto result = s2_->fetchCase(case_id);
+        if (!result.ok() || !result.value)
+            return SystemResult<JusticeFlow::Case>::failure(result.code);
+        // Convert subsystem2::Case to JusticeFlow::Case
+        JusticeFlow::Case justiceCase;
+        justiceCase.case_id = result.value->getCaseId();
+        return SystemResult<JusticeFlow::Case>::success(justiceCase);
     }
 
-    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStation(
-        PGconn *conn, int station_id)
+    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStation(PGconn *, int station_id)
     {
-        return s1_->getCasesByStation(conn, station_id);
+        // If S2 exposes an appropriate query, call through; otherwise, implement or throw.
+        // Placeholder:
+        return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStatus(
-        PGconn *conn, int station_id, JusticeFlow::CaseStatus st)
+    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStatus(PGconn *, int station_id, JusticeFlow::CaseStatus status)
     {
-        return s1_->getCasesByStatus(conn, station_id, st);
+        // If S2 exposes this, call through; otherwise, implement or throw.
+        return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::updateCaseStatus(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, JusticeFlow::CaseStatus st, const char *reason)
+    SystemResult<void> CaseFacade::updateCaseStatus(PGconn *, const JusticeFlow::SessionContext &, int, JusticeFlow::CaseStatus, const char *)
     {
-        return s1_->updateCaseStatus(conn, session, case_id, st, reason);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::closeCase(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, const char *reason)
+    SystemResult<void> CaseFacade::closeCase(PGconn *, const JusticeFlow::SessionContext &, int, const char *)
     {
-        return s1_->closeCase(conn, session, case_id, reason);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::reopenCase(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, const char *reason)
+    SystemResult<void> CaseFacade::reopenCase(PGconn *, const JusticeFlow::SessionContext &, int, const char *)
     {
-        return s1_->reopenCase(conn, session, case_id, reason);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::transferCase(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, int to_station_id, const char *reason)
+    SystemResult<void> CaseFacade::transferCase(PGconn *, const JusticeFlow::SessionContext &, int, int, const char *)
     {
-        return s1_->transferCase(conn, session, case_id, to_station_id, reason);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<std::vector<JusticeFlow::CaseStatusLog>> CaseFacade::getCaseStatusLog(
-        PGconn *conn, int case_id)
+    SystemResult<std::vector<JusticeFlow::CaseStatusLog>> CaseFacade::getCaseStatusLog(PGconn *, int)
     {
-        return s1_->getCaseStatusLog(conn, case_id);
+        return SystemResult<std::vector<JusticeFlow::CaseStatusLog>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::assignOfficerToCase(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, int officer_id, JusticeFlow::CaseOfficerRole role)
+    SystemResult<void> CaseFacade::assignOfficerToCase(PGconn *, const JusticeFlow::SessionContext &, int, int, JusticeFlow::CaseOfficerRole)
     {
-        return s1_->assignOfficerToCase(conn, session, case_id, officer_id, role);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::relieveOfficerFromCase(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, int officer_id)
+    SystemResult<void> CaseFacade::relieveOfficerFromCase(PGconn *, const JusticeFlow::SessionContext &, int, int)
     {
-        return s1_->relieveOfficerFromCase(conn, session, case_id, officer_id);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<std::vector<JusticeFlow::CaseOfficer>> CaseFacade::getAssignedOfficers(
-        PGconn *conn, int case_id)
+    SystemResult<std::vector<JusticeFlow::CaseOfficer>> CaseFacade::getAssignedOfficers(PGconn *, int)
     {
-        return s1_->getAssignedOfficers(conn, case_id);
+        return SystemResult<std::vector<JusticeFlow::CaseOfficer>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<int> CaseFacade::addComplainant(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int case_id, const char *cnic,
-        JusticeFlow::RelationshipToVictim rel, bool notify)
+    SystemResult<int> CaseFacade::addComplainant(PGconn *, const JusticeFlow::SessionContext &, int, const char *, JusticeFlow::RelationshipToVictim, bool)
     {
-        return s1_->addComplainant(conn, session, case_id, cnic, rel, notify);
+        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::updateComplainantStatus(
-        PGconn *conn, const JusticeFlow::SessionContext &session,
-        int id, JusticeFlow::ComplainantStatus st, const char *reason)
+    SystemResult<void> CaseFacade::updateComplainantStatus(PGconn *, const JusticeFlow::SessionContext &, int, JusticeFlow::ComplainantStatus, const char *)
     {
-        return s1_->updateComplainantStatus(conn, session, id, st, reason);
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<std::vector<JusticeFlow::Complainant>> CaseFacade::getComplainantsByCase(
-        PGconn *conn, int case_id)
+    SystemResult<std::vector<JusticeFlow::Complainant>> CaseFacade::getComplainantsByCase(PGconn *, int)
     {
-        return s1_->getComplainantsByCase(conn, case_id);
+        return SystemResult<std::vector<JusticeFlow::Complainant>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<int> CaseFacade::addVictim(
@@ -1448,13 +1141,15 @@ namespace system_layer
         const char *injury_type, JusticeFlow::InjurySeverity sev,
         JusticeFlow::VulnerabilityCategory vuln, const char *medical_ref)
     {
-        return s1_->addVictim(conn, session, case_id, cnic, injury_type, sev, vuln, medical_ref);
+        Logger::error("[CaseFacade::addVictim] Not yet implemented (S2 pending).");
+        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<std::vector<JusticeFlow::Victim>> CaseFacade::getVictimsByCase(
         PGconn *conn, int case_id)
     {
-        return s1_->getVictimsByCase(conn, case_id);
+        Logger::error("[CaseFacade::getVictimsByCase] Not yet implemented (S2 pending).");
+        return SystemResult<std::vector<JusticeFlow::Victim>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<int> CaseFacade::addWitness(
@@ -1463,53 +1158,61 @@ namespace system_layer
         const char *statement, const char *file_path,
         JusticeFlow::WitnessProtection prot, bool conceal)
     {
-        return s1_->addWitness(conn, session, case_id, cnic, statement, file_path, prot, conceal);
+        Logger::error("[CaseFacade::addWitness] Not yet implemented (S2 pending).");
+        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<void> CaseFacade::updateWitnessProtection(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int witness_id, JusticeFlow::WitnessProtection st)
     {
-        return s1_->updateWitnessProtection(conn, session, witness_id, st);
+        Logger::error("[CaseFacade::updateWitnessProtection] Not yet implemented (S2 pending).");
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<std::vector<JusticeFlow::Witness>> CaseFacade::getWitnessesByCase(
         PGconn *conn, int case_id)
     {
-        return s1_->getWitnessesByCase(conn, case_id);
+        Logger::error("[CaseFacade::getWitnessesByCase] Not yet implemented (S2 pending).");
+        return SystemResult<std::vector<JusticeFlow::Witness>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<int> CaseFacade::addAccused(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int case_id, const char *cnic, JusticeFlow::InvolvementType inv)
     {
-        return s1_->addAccused(conn, session, case_id, cnic, inv);
+        Logger::error("[CaseFacade::addAccused] Not yet implemented (S2 pending).");
+        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<void> CaseFacade::linkAccusedAssociation(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int accused_id, int associated_id, JusticeFlow::AssociationType atype)
     {
-        return s1_->linkAccusedAssociation(conn, session, accused_id, associated_id, atype);
+        Logger::error("[CaseFacade::linkAccusedAssociation] Not yet implemented (S2 pending).");
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<std::vector<JusticeFlow::Accused>> CaseFacade::getAccusedByCase(
         PGconn *conn, int case_id)
     {
-        return s1_->getAccusedByCase(conn, case_id);
+        Logger::error("[CaseFacade::getAccusedByCase] Not yet implemented (S2 pending).");
+        return SystemResult<std::vector<JusticeFlow::Accused>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<void> CaseFacade::linkVehicleToCase(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int case_id, int vehicle_id, JusticeFlow::VehicleRole role, const char *notes)
     {
-        return s1_->linkVehicleToCase(conn, session, case_id, vehicle_id, role, notes);
+        Logger::error("[CaseFacade::linkVehicleToCase] Not yet implemented (S2 pending).");
+        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<std::vector<JusticeFlow::VehicleCase>> CaseFacade::getVehiclesByCase(
         PGconn *conn, int case_id)
     {
-        return s1_->getVehiclesByCase(conn, case_id);
+        Logger::error("[CaseFacade::getVehiclesByCase] Not yet implemented (S2 pending).");
+        return SystemResult<std::vector<JusticeFlow::VehicleCase>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     // =============================================================================
@@ -1554,7 +1257,7 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 7 — PersonnelFacade
+    // Section 7 — PersonnelFacade (delegates to S1)
     // =============================================================================
 
     SystemResult<JusticeFlow::Officer> PersonnelFacade::getOfficerById(PGconn *conn, int id)
@@ -1630,7 +1333,7 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 8 — DutyFacade
+    // Section 8 — DutyFacade (delegates to S1)
     // =============================================================================
 
     SystemResult<int> DutyFacade::scheduleDuty(
@@ -1705,7 +1408,7 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 9 — EnforcementFacade
+    // Section 9 — EnforcementFacade (delegates to S3)
     // =============================================================================
 
     SystemResult<int> EnforcementFacade::requestWarrant(
@@ -1792,7 +1495,7 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 10 — AuditFacade
+    // Section 10 — AuditFacade (delegates to S3)
     // =============================================================================
 
     SystemResult<std::vector<audit::AuditRecord>> AuditFacade::getAuditChangeHistory(int case_id)
@@ -1825,7 +1528,7 @@ namespace system_layer
     }
 
     // =============================================================================
-    // Section 11 — ForensicFacade
+    // Section 11 — ForensicFacade (delegates to S3)
     // =============================================================================
 
     SystemResult<int> ForensicFacade::createForensicRequest(

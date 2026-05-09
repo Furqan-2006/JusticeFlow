@@ -512,21 +512,22 @@ namespace system_layer
     class CaseFacade
     {
     public:
-        explicit CaseFacade(ISubsystem1Adapter *s1 = nullptr) noexcept : s1_(s1) {}
+        explicit CaseFacade(ISubsystem2Adapter *s2 = nullptr) noexcept : s2_(s2) {}
 
-        void setAdapter(ISubsystem1Adapter *a) noexcept { s1_ = a; }
+        void setAdapter(ISubsystem2Adapter *a) noexcept { s2_ = a; }
 
-        // Core CRUD
+        // --- Typical Case/Party CRUD and status transitions --
         SystemResult<int> registerCase(PGconn *, const JusticeFlow::SessionContext &,
                                        JusticeFlow::CaseType, time_t,
                                        const char *address, const char *desc,
                                        double lat, double lon,
                                        int station_id, const char *cnic);
+
         SystemResult<JusticeFlow::Case> getCaseById(PGconn *, int case_id);
         SystemResult<std::vector<JusticeFlow::Case>> getCasesByStation(PGconn *, int station_id);
         SystemResult<std::vector<JusticeFlow::Case>> getCasesByStatus(PGconn *, int station_id,
                                                                       JusticeFlow::CaseStatus);
-        // Status transitions
+
         SystemResult<void> updateCaseStatus(PGconn *, const JusticeFlow::SessionContext &,
                                             int case_id, JusticeFlow::CaseStatus, const char *reason);
         SystemResult<void> closeCase(PGconn *, const JusticeFlow::SessionContext &,
@@ -537,14 +538,12 @@ namespace system_layer
                                         int case_id, int to_station_id, const char *reason);
         SystemResult<std::vector<JusticeFlow::CaseStatusLog>> getCaseStatusLog(PGconn *, int case_id);
 
-        // Officer assignment
         SystemResult<void> assignOfficerToCase(PGconn *, const JusticeFlow::SessionContext &,
                                                int case_id, int officer_id, JusticeFlow::CaseOfficerRole);
         SystemResult<void> relieveOfficerFromCase(PGconn *, const JusticeFlow::SessionContext &,
                                                   int case_id, int officer_id);
         SystemResult<std::vector<JusticeFlow::CaseOfficer>> getAssignedOfficers(PGconn *, int case_id);
 
-        // Complainants
         SystemResult<int> addComplainant(PGconn *, const JusticeFlow::SessionContext &,
                                          int case_id, const char *cnic,
                                          JusticeFlow::RelationshipToVictim, bool notify);
@@ -552,14 +551,12 @@ namespace system_layer
                                                    int id, JusticeFlow::ComplainantStatus, const char *reason);
         SystemResult<std::vector<JusticeFlow::Complainant>> getComplainantsByCase(PGconn *, int case_id);
 
-        // Victims
         SystemResult<int> addVictim(PGconn *, const JusticeFlow::SessionContext &,
                                     int case_id, const char *cnic,
                                     const char *injury_type, JusticeFlow::InjurySeverity,
                                     JusticeFlow::VulnerabilityCategory, const char *medical_ref);
         SystemResult<std::vector<JusticeFlow::Victim>> getVictimsByCase(PGconn *, int case_id);
 
-        // Witnesses
         SystemResult<int> addWitness(PGconn *, const JusticeFlow::SessionContext &,
                                      int case_id, const char *cnic,
                                      const char *statement, const char *file_path,
@@ -568,7 +565,6 @@ namespace system_layer
                                                    int witness_id, JusticeFlow::WitnessProtection);
         SystemResult<std::vector<JusticeFlow::Witness>> getWitnessesByCase(PGconn *, int case_id);
 
-        // Accused
         SystemResult<int> addAccused(PGconn *, const JusticeFlow::SessionContext &,
                                      int case_id, const char *cnic, JusticeFlow::InvolvementType);
         SystemResult<void> linkAccusedAssociation(PGconn *, const JusticeFlow::SessionContext &,
@@ -576,15 +572,13 @@ namespace system_layer
                                                   JusticeFlow::AssociationType);
         SystemResult<std::vector<JusticeFlow::Accused>> getAccusedByCase(PGconn *, int case_id);
 
-        // Vehicles
         SystemResult<void> linkVehicleToCase(PGconn *, const JusticeFlow::SessionContext &,
                                              int case_id, int vehicle_id,
                                              JusticeFlow::VehicleRole, const char *notes);
         SystemResult<std::vector<JusticeFlow::VehicleCase>> getVehiclesByCase(PGconn *, int case_id);
 
     private:
-        ISubsystem1Adapter *s1_;
-        ISubsystem1Adapter *s2_;
+        ISubsystem2Adapter *s2_;
     };
 
     // -----------------------------------------------------------------------------
