@@ -773,6 +773,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleStatusCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         // Show overall system status
         std::ostringstream oss;
         oss << "\n╔════════════════════════════════════════════════════════╗\n"
@@ -795,6 +796,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleVersionCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         std::ostringstream oss;
         oss << "JusticeFlow CLI v1.0.0\n"
             << "Build: 2026-05-08\n"
@@ -808,6 +810,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleHelpCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         std::ostringstream oss;
         oss << "\n"
             << "AUTHENTICATION\n"
@@ -867,12 +870,14 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleExitCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         m_running = false;
         return CommandResult::ok("Exiting...");
     }
 
     CommandResult CLIInterface::handleHistoryCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         std::ostringstream oss;
         oss << "Command History:\n";
         for (size_t i = 0; i < m_history.size(); ++i)
@@ -884,6 +889,7 @@ namespace cli_interface
 
     CommandResult CLIInterface::handleClearCommand(const std::vector<std::string> &args)
     {
+        (void)args;
         system("clear || cls"); // Works on Unix and Windows
         return CommandResult::ok();
     }

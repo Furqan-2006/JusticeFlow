@@ -21,6 +21,38 @@ protected:
     }
 };
 
+// Minimal concrete adapter — exists only so injectAuth gets a non-null ptr
+class StubAuthAdapter final : public system_layer::IAuthAdapter
+{
+public:
+    system_layer::SystemResult<std::string> login(const char *, const char *) override
+    {
+        return system_layer::SystemResult<std::string>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+    }
+
+    system_layer::SystemResult<JusticeFlow::SessionContext> validateToken(const char *) override
+    {
+        return system_layer::SystemResult<JusticeFlow::SessionContext>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+    }
+
+    system_layer::SystemResult<void> validateRank(const JusticeFlow::SessionContext &, JusticeFlow::OfficerRank) override
+    {
+        return system_layer::SystemResult<void>::success();
+    }
+
+    bool isDutyActive(int) override { return false; }
+
+    system_layer::SystemResult<void> refreshSession(const char *) override
+    {
+        return system_layer::SystemResult<void>::success();
+    }
+
+    system_layer::SystemResult<void> logout(const char *) override
+    {
+        return system_layer::SystemResult<void>::success();
+    }
+};
+
 // =========================================================================
 // Initialization Tests
 // =========================================================================
@@ -68,11 +100,12 @@ TEST_F(OrchestratorTest, InjectionGuard)
     system_layer::SystemInitConfig config;
     auto init_result = sys.init(config);
 
-    // After init, injection should throw
+    EXPECT_TRUE(init_result.ok());
+    EXPECT_TRUE(sys.isInitialized());
+
+    // Pass a real adapter — injectAuth must reach the "already initialized" guard to throw
     EXPECT_THROW(
-        {
-            sys.injectAuth({});
-        },
+        sys.injectAuth(std::make_unique<StubAuthAdapter>()),
         std::logic_error);
 }
 

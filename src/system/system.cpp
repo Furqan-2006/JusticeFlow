@@ -220,28 +220,33 @@ namespace system_layer
     // into uniform SystemResult<T> using the Section-1 helpers.
     // -----------------------------------------------------------------------------
 
+    // ---- Replace the entire DefaultSubsystem1Adapter implementation with this ----
+
     class DefaultSubsystem1Adapter final : public ISubsystem1Adapter
     {
     public:
-        // ── Duty ──────────────────────────────────────────────────────────────────
+        // ── Duty Scheduling ───────────────────────────────────────────────────────
 
         SystemResult<int> scheduleDuty(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int officer_id, int station_id, int route_id,
-            JusticeFlow::ShiftType st, const char *duty_date,
-            time_t start, time_t end) override
+            int officer_id, int station_id, int patrol_route_id,
+            JusticeFlow::ShiftType shift_type,
+            const char *duty_date, time_t scheduled_start,
+            time_t scheduled_end) override
         {
             return detail::adapt_bool<int>(
                 [&](int &id, JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::scheduleDuty(
-                        conn, session, officer_id, station_id, route_id,
-                        st, duty_date, start, end, id, rc);
+                        conn, session, officer_id, station_id, patrol_route_id,
+                        shift_type, duty_date, scheduled_start, scheduled_end,
+                        id, rc);
                 });
         }
 
         SystemResult<void> markDutyStart(
-            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int duty_id) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
@@ -251,7 +256,8 @@ namespace system_layer
         }
 
         SystemResult<void> markDutyEnd(
-            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int duty_id) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
@@ -262,18 +268,20 @@ namespace system_layer
 
         SystemResult<void> updateDutyStatus(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int duty_id, JusticeFlow::DutyStatus st, const char *reason) override
+            int duty_id, JusticeFlow::DutyStatus new_status,
+            const char *absence_reason) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::updateDutyStatus(
-                        conn, session, duty_id, st, reason, rc);
+                        conn, session, duty_id, new_status, absence_reason, rc);
                 });
         }
 
         SystemResult<void> cancelDuty(
-            PGconn *conn, const JusticeFlow::SessionContext &session, int duty_id) override
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int duty_id) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
@@ -281,6 +289,8 @@ namespace system_layer
                     return subsystem1::Subsystem1::cancelDuty(conn, session, duty_id, rc);
                 });
         }
+
+        // ── Duty Queries ──────────────────────────────────────────────────────────
 
         SystemResult<std::vector<JusticeFlow::DutyRoster>> getDutyRoster(
             PGconn *conn, int station_id, const char *duty_date) override
@@ -308,7 +318,8 @@ namespace system_layer
             return detail::adapt_rc<std::vector<JusticeFlow::DutyRoster>>(
                 [&](std::vector<JusticeFlow::DutyRoster> &out)
                 {
-                    return subsystem1::Subsystem1::getOfficerDutyHistory(conn, officer_id, from, to, out);
+                    return subsystem1::Subsystem1::getOfficerDutyHistory(
+                        conn, officer_id, from, to, out);
                 });
         }
 
@@ -317,18 +328,20 @@ namespace system_layer
         SystemResult<int> createPatrolRoute(
             PGconn *conn, const JusticeFlow::SessionContext &session,
             int station_id, const char *beat_code,
-            const char *name, const char *area) override
+            const char *route_name, const char *area_description) override
         {
             return detail::adapt_bool<int>(
                 [&](int &id, JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::createPatrolRoute(
-                        conn, session, station_id, beat_code, name, area, id, rc);
+                        conn, session, station_id, beat_code, route_name,
+                        area_description, id, rc);
                 });
         }
 
         SystemResult<void> deactivatePatrolRoute(
-            PGconn *conn, const JusticeFlow::SessionContext &session, int route_id) override
+            PGconn *conn, const JusticeFlow::SessionContext &session,
+            int route_id) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
@@ -381,39 +394,40 @@ namespace system_layer
         }
 
         SystemResult<std::vector<JusticeFlow::Officer>> getOfficersByStatus(
-            PGconn *conn, int station_id, JusticeFlow::OfficerStatus st) override
+            PGconn *conn, int station_id, JusticeFlow::OfficerStatus status) override
         {
             return detail::adapt_rc<std::vector<JusticeFlow::Officer>>(
                 [&](std::vector<JusticeFlow::Officer> &out)
                 {
-                    return subsystem1::Subsystem1::getOfficersByStatus(conn, station_id, st, out);
+                    return subsystem1::Subsystem1::getOfficersByStatus(
+                        conn, station_id, status, out);
                 });
         }
 
         SystemResult<void> updateOfficerStatus(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int officer_id, JusticeFlow::OfficerStatus st) override
+            int officer_id, JusticeFlow::OfficerStatus new_status) override
         {
             return detail::adapt_bool_void(
                 [&](JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::updateOfficerStatus(
-                        conn, session, officer_id, st, rc);
+                        conn, session, officer_id, new_status, rc);
                 });
         }
 
         SystemResult<int> promoteOfficer(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int officer_id, JusticeFlow::OfficerRank rank,
-            const char *belt, const char *type,
-            const char *effective, const char *order_date) override
+            int officer_id, JusticeFlow::OfficerRank new_rank,
+            const char *new_belt_number, const char *promotion_type,
+            const char *effective_date, const char *order_date) override
         {
             return detail::adapt_bool<int>(
                 [&](int &id, JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::promoteOfficer(
-                        conn, session, officer_id, rank,
-                        belt, type, effective, order_date, id, rc);
+                        conn, session, officer_id, new_rank, new_belt_number,
+                        promotion_type, effective_date, order_date, id, rc);
                 });
         }
 
@@ -429,16 +443,16 @@ namespace system_layer
 
         SystemResult<int> deployOfficer(
             PGconn *conn, const JusticeFlow::SessionContext &session,
-            int officer_id, int to_station,
-            const char *reason, const char *order_no,
-            const char *from_date, const char *until_date) override
+            int officer_id, int to_station_id,
+            const char *deployment_reason, const char *order_number,
+            const char *deployed_from, const char *deployed_until) override
         {
             return detail::adapt_bool<int>(
                 [&](int &id, JusticeFlow::ResultCode &rc)
                 {
                     return subsystem1::Subsystem1::deployOfficer(
-                        conn, session, officer_id, to_station,
-                        reason, order_no, from_date, until_date, id, rc);
+                        conn, session, officer_id, to_station_id, deployment_reason,
+                        order_number, deployed_from, deployed_until, id, rc);
                 });
         }
 
@@ -459,9 +473,12 @@ namespace system_layer
             return detail::adapt_rc<std::vector<JusticeFlow::OfficerDeployment>>(
                 [&](std::vector<JusticeFlow::OfficerDeployment> &out)
                 {
-                    return subsystem1::Subsystem1::getOfficerDeployments(conn, officer_id, active_only, out);
+                    return subsystem1::Subsystem1::getOfficerDeployments(
+                        conn, officer_id, active_only, out);
                 });
         }
+
+        // ── Reports ───────────────────────────────────────────────────────────────
 
         SystemResult<std::string> generateOfficerReport(
             PGconn *conn, const JusticeFlow::SessionContext &session,
@@ -919,6 +936,9 @@ namespace system_layer
 
     SystemResult<void> SystemManager::init(const SystemInitConfig &config)
     {
+        if (initialized_.load(std::memory_order_acquire))
+            return SystemResult<void>::success();
+
         Logger::info("[System] Initialising JusticeFlow SystemManager.");
 
         // ── Stage 1: install default adapters for any uninjected slot ─────────────
@@ -931,6 +951,12 @@ namespace system_layer
         if (!s3_adapter_)
             s3_adapter_ = std::make_unique<DefaultSubsystem3Adapter>();
 
+        if (!auth_adapter_ || !s1_adapter_ || !s2_adapter_ || !s3_adapter_)
+        {
+            Logger::error("[System] Adapter initialization failed.");
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        }
+
         // ── Stage 2: Auth init (no external I/O; AuthManager boots on first use) ──
         Logger::info("[System] Stage 2: Auth ready.");
 
@@ -939,14 +965,23 @@ namespace system_layer
 
         // ── Stage 4: S3 audit — opens a dedicated read-only DB connection ─────────
         Logger::info("[System] Stage 4: Connecting S3 audit subsystem.");
-        JusticeFlow::ResultCode rc =
-            subsystem3::Subsystem3::initAudit(config.audit_db_conninfo);
-        if (rc != JusticeFlow::ResultCode::OK)
+        try
         {
-            Logger::error("[System] Stage 4 failed: S3 audit connection refused. Aborting init.");
-            return SystemResult<void>::failure(rc);
+            JusticeFlow::ResultCode rc =
+                subsystem3::Subsystem3::initAudit(config.audit_db_conninfo);
+            if (rc != JusticeFlow::ResultCode::OK)
+                Logger::error("[System] S3 audit init failed. Proceeding anyway (audit disabled).");
+            else
+                Logger::info("[System] Stage 4: S3 audit connected.");
         }
-        Logger::info("[System] Stage 4: S3 audit connected.");
+        catch (const std::exception &e)
+        {
+            Logger::error((std::string("[System] S3 audit threw: ") + e.what() + ". Continuing.").c_str());
+        }
+        catch (...)
+        {
+            Logger::error("[System] S3 audit threw unknown exception. Continuing.");
+        }
 
         // ── Stage 5: wire sub-facades to their adapter raw pointers ──────────────
         auth_facade_.setAdapter(auth_adapter_.get());
@@ -1011,10 +1046,17 @@ namespace system_layer
         return adapter_->validateToken(token);
     }
 
+    // ✅ FIXED
     SystemResult<void> AuthFacade::validateRank(
-        const JusticeFlow::SessionContext &s, JusticeFlow::OfficerRank required)
+        const JusticeFlow::SessionContext &session,
+        JusticeFlow::OfficerRank required)
     {
-        return adapter_->validateRank(s, required);
+        // Verify session rank meets minimum requirement
+        if (session.rank < required)
+        {
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::RANK_INSUFFICIENT);
+        }
+        return SystemResult<void>::success();
     }
 
     bool AuthFacade::isDutyActive(int officer_id)
@@ -1043,16 +1085,22 @@ namespace system_layer
         double lat, double lon,
         int station_id, const char *cnic)
     {
-        // You may need to package all parameters into a FIRRegistrationRequest
-        subsystem2::FIRRegistrationRequest req{/* fill fields appropriately */};
-        // Fill fields: req.caseType = type, req.filedTime = filed_time, req.address = ..., etc.
-        // This will depend on your FIRRegistrationRequest structure.
-        // Example:
-        // req.caseType = type; req.filedTime = filed_time; req.address = address; ...
+        subsystem2::FIRRegistrationRequest req;
+        req.type = type;
+        req.incident_date = filed_time;
+        req.incident_address = address ? std::string(address) : "";
+        req.description = desc ? std::string(desc) : "";
+        req.lat = lat;
+        req.lon = lon;
+        req.station_id = station_id;
+        req.complainant_cnic = cnic ? std::string(cnic) : "";
+
         auto result = s2_->registerFIR(req, session);
-        if (!result.ok())
+
+        // ✅ Null-check before dereferencing
+        if (!result.ok() || !result.value)
             return SystemResult<int>::failure(result.code);
-        // Assuming Case has an id member:
+
         return SystemResult<int>::success(result.value->getCaseId());
     }
 

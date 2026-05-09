@@ -113,7 +113,10 @@ TEST_OBJECTS := $(TEST_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 
 test: $(TEST_EXECUTABLE)
 	@echo "[RUN]  Running tests..."
-	@./$(TEST_EXECUTABLE)
+	@export PGHOST=/var/run/postgresql && \
+	 export PGDATABASE=justiceflow && \
+	 export PGUSER=justice_app && \
+	 ./$(TEST_EXECUTABLE)
 
 $(TEST_EXECUTABLE): $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o, $(OBJECTS)) $(TEST_OBJECTS)
 	@echo "[LINK] Test Suite"
