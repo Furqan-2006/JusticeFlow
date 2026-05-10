@@ -1170,8 +1170,10 @@ namespace system_layer
         if (conn == nullptr || PQstatus(conn) != CONNECTION_OK || cnic == nullptr || cnic[0] == '\0')
             return SystemResult<int>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
 
+        static std::atomic<unsigned long> fir_seq{0};
         char fir[64], ts_file[32], lat_s[32], lon_s[32], station_s[32], filed_by_s[32];
-        std::snprintf(fir, sizeof(fir), "FIR-%ld-%04d", static_cast<long>(filed_time), std::rand() % 10000);
+        const unsigned long seq = fir_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+        std::snprintf(fir, sizeof(fir), "FIR-%ld-%06lu", static_cast<long>(filed_time), seq);
         std::snprintf(ts_file, sizeof(ts_file), "%ld", static_cast<long>(filed_time));
         std::snprintf(lat_s, sizeof(lat_s), "%.6f", lat);
         std::snprintf(lon_s, sizeof(lon_s), "%.6f", lon);

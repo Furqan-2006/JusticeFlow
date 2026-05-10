@@ -22,6 +22,10 @@ class JusticeFlowTestFixture : public ::testing::Test
 protected:
     void SetUp() override
     {
+        setenv("JF_TEST_AUTH_FALLBACK",
+               "42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123",
+               1);
+
         auto &sys = system_layer::SystemManager::getInstance();
 
         // ✅ Skip if already initialized

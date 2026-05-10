@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <sstream>
 
 namespace auth
 {
@@ -66,15 +67,31 @@ namespace auth
         }
 
         // Query: SELECT officer_id, rank FROM officers WHERE cnic = ? AND crypt(?, password_hash) = password_hash
-        char query[512];
-        std::snprintf(query, sizeof(query),
-                      "SELECT officer_id, current_rank, station_id FROM officers WHERE cnic = '%s' "
-                      "AND crypt('%s', password_hash) = password_hash",
-                      cnic.c_str(), password.c_str());
-
         std::vector<std::vector<std::string>> results;
-        JusticeFlow::ResultCode db_result =
-            (db_connection ? db_connection->execute(query, results) : JusticeFlow::ResultCode::DB_ERROR);
+        JusticeFlow::ResultCode db_result = JusticeFlow::ResultCode::DB_ERROR;
+        PGconn *raw_conn = db_connection ? db_connection->getConnection() : nullptr;
+        if (raw_conn != nullptr && db_connection->lock() == JusticeFlow::ResultCode::OK)
+        {
+            const char *values[] = {cnic.c_str(), password.c_str()};
+            PGresult *res = PQexecParams(
+                raw_conn,
+                "SELECT officer_id, current_rank, station_id FROM officers "
+                "WHERE cnic = $1 AND crypt($2, password_hash) = password_hash",
+                2, nullptr, values, nullptr, nullptr, 0);
+            if (PQresultStatus(res) == PGRES_TUPLES_OK)
+            {
+                db_result = JusticeFlow::ResultCode::OK;
+                for (int i = 0; i < PQntuples(res); ++i)
+                {
+                    std::vector<std::string> row;
+                    for (int j = 0; j < PQnfields(res); ++j)
+                        row.emplace_back(PQgetvalue(res, i, j));
+                    results.emplace_back(std::move(row));
+                }
+            }
+            PQclear(res);
+            (void)db_connection->unlock();
+        }
 
         // mlock_guard destructor will zero the password buffer here
 
@@ -275,7 +292,7 @@ namespace auth
 
         for (char c : password)
         {
-            if (c == '\0' || std::iscntrl(static_cast<unsigned char>(c)))
+            if (std::iscntrl(static_cast<unsigned char>(c)))
                 return true;
         }
         return false;
@@ -283,11 +300,28 @@ namespace auth
 
     static bool authenticateFallbackUser(const std::string &cnic, const std::string &password, JusticeFlow::SessionContext &out_session)
     {
-        if (!((cnic == "42401-637951-0" && password == "JusticeDemo@2026") ||
-              (cnic == "12345-6789012-3" && password == "password123")))
+        const char *raw = std::getenv("JF_TEST_AUTH_FALLBACK");
+        if (raw == nullptr || raw[0] == '\0')
         {
             return false;
         }
+
+        bool matched = false;
+        std::stringstream ss(raw);
+        std::string pair;
+        while (std::getline(ss, pair, ';'))
+        {
+            const std::size_t pos = pair.find('=');
+            if (pos == std::string::npos)
+                continue;
+            if (pair.substr(0, pos) == cnic && pair.substr(pos + 1) == password)
+            {
+                matched = true;
+                break;
+            }
+        }
+        if (!matched)
+            return false;
 
         std::string token = token_generator::generate();
         if (token.empty())
@@ -296,7 +330,7 @@ namespace auth
         }
 
         long now = time(nullptr);
-        out_session.officerId = (cnic == "42401-637951-0") ? 42401 : 1;
+        out_session.officerId = 1;
         out_session.cnic = cnic;
         out_session.rank = JusticeFlow::OfficerRank::SI;
         out_session.stationId = 1;

@@ -119,12 +119,18 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
     int first_id = -1;
     int second_id = -1;
     std::thread t1([&]() {
-        auto r = sys.cases().registerCase(db.getConnection(), session, JusticeFlow::CaseType::MURDER, time(nullptr), "A", "A", 0, 0, 1, session.cnic.c_str());
+        MockDatabase local_db;
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+            return;
+        auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::MURDER, time(nullptr), "A", "A", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
             first_id = r.value;
     });
     std::thread t2([&]() {
-        auto r = sys.cases().registerCase(db.getConnection(), session, JusticeFlow::CaseType::ROBBERY, time(nullptr), "B", "B", 0, 0, 1, session.cnic.c_str());
+        MockDatabase local_db;
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+            return;
+        auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::ROBBERY, time(nullptr), "B", "B", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
             second_id = r.value;
     });
