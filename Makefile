@@ -213,24 +213,30 @@ init-db:
 	@echo "[DB] Schema initialization completed"
 
 seed-db:
-	@if [ "$(SEED_DATA)" = "0" ] || [ "$(SEED_DATA)" = "false" ] || [ "$(SEED_DATA)" = "FALSE" ] || [ "$(SEED_DATA)" = "False" ]; then \
-		echo "[DB] Seeding disabled (set SEED_DATA=1 to enable)"; \
-	elif [ -f db/generate_data.py ]; then \
-		if python3 -c "import numpy, psycopg2, faker" >/dev/null 2>&1; then \
-			echo "[DB] Running seed script: db/generate_data.py"; \
-			python3 db/generate_data.py; \
-		else \
-			echo "[DB] Python seed dependencies missing. Run 'make setup-python' first."; \
-		fi; \
-	elif [ -f db/data_generator/generate_data.py ]; then \
-		if python3 -c "import numpy, psycopg2, faker" >/dev/null 2>&1; then \
-			echo "[DB] Running seed script: db/data_generator/generate_data.py"; \
-			python3 db/data_generator/generate_data.py; \
-		else \
-			echo "[DB] Python seed dependencies missing. Run 'make setup-python' first."; \
-		fi; \
+	@seed_lower="$$(echo "$(SEED_DATA)" | tr '[:upper:]' '[:lower:]')"; \
+	if [ "$$seed_lower" = "0" ] || [ "$$seed_lower" = "false" ]; then \
+		echo "[DB] Seeding disabled (set SEED_DATA=1 or SEED_DATA=auto to enable)"; \
 	else \
-		echo "[DB] No data generator found. Skipping seed step."; \
+		seed_script=""; \
+		if [ "$$seed_lower" != "1" ] && [ "$$seed_lower" != "true" ] && [ "$$seed_lower" != "auto" ]; then \
+			echo "[DB] Unsupported SEED_DATA='$(SEED_DATA)'. Use 0, 1, or auto."; \
+			exit 1; \
+		fi; \
+		if [ -f db/generate_data.py ]; then \
+			seed_script="db/generate_data.py"; \
+		elif [ -f db/data_generator/generate_data.py ]; then \
+			seed_script="db/data_generator/generate_data.py"; \
+		fi; \
+		if [ -n "$$seed_script" ]; then \
+			if python3 -c "import numpy, psycopg2, faker" >/dev/null 2>&1; then \
+				echo "[DB] Running seed script: $$seed_script"; \
+				python3 "$$seed_script"; \
+			else \
+				echo "[DB] Python seed dependencies missing. Run 'make setup-python' first."; \
+			fi; \
+		else \
+			echo "[DB] No data generator found. Skipping seed step."; \
+		fi; \
 	fi
 
 setup-db: init-db seed-db
@@ -241,8 +247,20 @@ setup-python:
 
 setup-ai:
 	@echo "[PY] Verifying AI agent imports"
-	@python3 -c "import src.ai_agents.hotspot_agent; import src.ai_agents.priority_agent"
-	@python3 -c "import src.ai_agents.workload" || python3 -c "import src.ai_agents.workload_agent"
+	@python3 -c "import src.ai_agents.hotspot_agent; import src.ai_agents.priority_agent" || \
+		( echo "[PY] Failed to import required AI agents: hotspot_agent, priority_agent"; exit 1 )
+	@workload_found=0; \
+	for module_name in src.ai_agents.workload src.ai_agents.workload_agent; do \
+		if python3 -c "import importlib; importlib.import_module('$$module_name')" >/dev/null 2>&1; then \
+			echo "[PY] Imported $$module_name"; \
+			workload_found=1; \
+			break; \
+		fi; \
+	done; \
+	if [ "$$workload_found" -ne 1 ]; then \
+		echo "[PY] Could not import src.ai_agents.workload or src.ai_agents.workload_agent"; \
+		exit 1; \
+	fi
 	@echo "[PY] AI agent imports verified"
 
 setup-status:

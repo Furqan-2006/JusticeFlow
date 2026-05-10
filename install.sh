@@ -19,6 +19,7 @@ REPO_URL=""
 
 DEFAULT_REPO_URL="https://github.com/Furqan-2006/JusticeFlow.git"
 PROJECT_DIR=""
+EXECUTABLE_PATH="build/justiceflow"
 
 print_header() { echo -e "\n${BLUE}${BOLD}== $1 ==${NC}"; }
 print_ok() { echo -e "${GREEN}✔ $1${NC}"; }
@@ -39,6 +40,18 @@ Options:
   --repo-url <url>   Clone from custom repository URL
   --help             Show this help message
 EOF
+}
+
+validate_repo_url() {
+  local url="$1"
+  case "$url" in
+    https://*|git@*|ssh://*) return 0 ;;
+    *)
+      print_error "Invalid repository URL: $url"
+      print_error "Use a URL starting with https://, ssh://, or git@"
+      return 1
+      ;;
+  esac
 }
 
 on_error() {
@@ -94,6 +107,7 @@ else
   clone_url="${REPO_URL:-$DEFAULT_REPO_URL}"
   read -r -p "Repository URL [${clone_url}]: " input_url
   clone_url="${input_url:-$clone_url}"
+  validate_repo_url "$clone_url"
   read -r -p "Clone destination [JusticeFlow]: " clone_dir
   clone_dir="${clone_dir:-JusticeFlow}"
 
@@ -107,9 +121,17 @@ cd "$PROJECT_DIR"
 
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
   print_header "System Prerequisites"
+  if [[ ! -f "./justiceflow_setup.sh" ]]; then
+    print_error "Required script not found: ./justiceflow_setup.sh"
+    exit 1
+  fi
+  if [[ ! -x "./justiceflow_setup.sh" ]]; then
+    chmod +x ./justiceflow_setup.sh
+  fi
   if [[ "$EUID" -eq 0 ]]; then
     ./justiceflow_setup.sh
   else
+    print_info "Running justiceflow_setup.sh with sudo for system package installation"
     sudo ./justiceflow_setup.sh
   fi
 else
@@ -137,10 +159,10 @@ else
 fi
 
 print_header "Validation"
-if [[ -x "build/justiceflow" ]]; then
-  print_ok "Binary created: build/justiceflow"
+if [[ -x "$EXECUTABLE_PATH" ]]; then
+  print_ok "Binary created: $EXECUTABLE_PATH"
 else
-  print_error "Expected binary not found at build/justiceflow"
+  print_error "Expected binary not found at $EXECUTABLE_PATH"
   exit 1
 fi
 
@@ -148,5 +170,5 @@ print_header "Installation Complete"
 echo -e "${GREEN}${BOLD}JusticeFlow setup finished successfully.${NC}"
 echo "Next steps:"
 echo "  1) Configure database credentials (PGHOST/PGDATABASE/PGUSER as needed)"
-echo "  2) Run backend: ./build/justiceflow"
+echo "  2) Run backend: ./$EXECUTABLE_PATH"
 echo "  3) Start dashboard (if needed): cd dashboard && python3 run.py"
