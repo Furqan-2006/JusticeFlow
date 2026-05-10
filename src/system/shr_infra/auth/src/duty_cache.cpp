@@ -83,7 +83,7 @@ namespace auth
         // Query: SELECT is_on_duty FROM officers WHERE officer_id = ?
         char query[256];
         std::snprintf(query, sizeof(query),
-                      "SELECT is_on_duty FROM officers WHERE officer_id = %d", officer_id);
+                      "SELECT status FROM officers WHERE officer_id = %d", officer_id);
 
         std::vector<std::vector<std::string>> results;
         JusticeFlow::ResultCode db_result =

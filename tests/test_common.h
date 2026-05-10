@@ -22,6 +22,10 @@ class JusticeFlowTestFixture : public ::testing::Test
 protected:
     void SetUp() override
     {
+        setenv("JF_TEST_AUTH_FALLBACK",
+               "42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123",
+               1);
+
         auto &sys = system_layer::SystemManager::getInstance();
 
         // ✅ Skip if already initialized
@@ -73,7 +77,18 @@ public:
     bool connect(const std::string &conninfo)
     {
         m_conn = PQconnectdb(conninfo.c_str());
-        return PQstatus(m_conn) == CONNECTION_OK;
+        if (PQstatus(m_conn) == CONNECTION_OK)
+        {
+            return true;
+        }
+
+        if (m_conn)
+        {
+            PQfinish(m_conn);
+            m_conn = nullptr;
+        }
+
+        return false;
     }
 
     PGconn *getConnection() { return m_conn; }

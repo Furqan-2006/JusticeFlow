@@ -18,9 +18,9 @@ namespace auth
         char query[512];
         std::snprintf(query, sizeof(query),
                       "INSERT INTO sessions (token, officer_id, login_timestamp, expires_at, "
-                      "last_active_at, is_active) VALUES ('%s', %d, %ld, %ld, true)",
+                      "last_active_at, is_active) VALUES ('%s', %d, %ld, %ld, %ld, true)",
                       session.sessionToken.c_str(), session.officerId, session.createdAt,
-                      session.expiresAt);
+                      session.expiresAt, session.createdAt);
 
         std::vector<std::vector<std::string>> results;
         JusticeFlow::ResultCode db_result =
