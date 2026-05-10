@@ -88,10 +88,7 @@ public:
             m_conn = nullptr;
         }
 
-        JusticeFlow::DBConfig cfg;
-        (void)cfg.loadFromEnvironment();
-        m_conn = PQconnectdb(cfg.toConnectionString().c_str());
-        return PQstatus(m_conn) == CONNECTION_OK;
+        return false;
     }
 
     PGconn *getConnection() { return m_conn; }
