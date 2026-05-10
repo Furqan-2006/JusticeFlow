@@ -1,0 +1,112 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="8iYVVZz5tUS0Gh3NZEBl">
+    <mxGraphModel dx="1543" dy="1943" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="M2idaDnVwaQxPrkLA32n-1" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Auth Manager&lt;br&gt;&amp;lt;&amp;lt;singleton&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ getInstance() : AuthManager&lt;br&gt;+ login() :&amp;nbsp;SessionContext&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ validateToken() : bool&lt;br&gt;+ validateRank() : bool&lt;br&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="130" width="180" x="70" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-2" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Session Context&lt;br&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- sessionToken: String&lt;br&gt;- officerId : Integer&lt;br&gt;- rank : String&lt;br&gt;- expiresAt : DateTime&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="110" width="160" x="460" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-3" edge="1" parent="1" source="M2idaDnVwaQxPrkLA32n-1" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;" target="M2idaDnVwaQxPrkLA32n-2" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="290" y="94.5" as="sourcePoint" />
+            <mxPoint x="450" y="94.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-4" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&amp;lt;&amp;lt;use&amp;gt;&amp;gt;" vertex="1">
+          <mxGeometry height="30" width="60" x="310" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-5" parent="1" style="shape=umlFrame;whiteSpace=wrap;html=1;pointerEvents=0;" value="AuthModule" vertex="1">
+          <mxGeometry height="230" width="640" x="50" y="-20" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-6" parent="1" style="shape=umlFrame;whiteSpace=wrap;html=1;pointerEvents=0;" value="Enforcement" vertex="1">
+          <mxGeometry height="550" width="640" x="50" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-7" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;controller&amp;gt;&amp;gt;&lt;br&gt;Arrest Manager&lt;/b&gt;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ createArrest():&amp;nbsp;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ updateCustody();&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="90" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-9" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;controller&amp;gt;&amp;gt;&lt;br&gt;Warrant Manager&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ IssueWarrant:&amp;nbsp;&amp;nbsp;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ revokeWarrant;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="90" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-10" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;controller&amp;gt;&amp;gt;&lt;br&gt;Bail Manager&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ grantBail()&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="90" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-11" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;br&gt;Arrest&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- arrest_Id: int&lt;br&gt;- accussed_cnic: String&lt;br&gt;- custody_status: String&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="480" y="280" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-12" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;br&gt;Warrant&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- warrant_id: int&lt;br&gt;- warrant_type : String&lt;br&gt;- status : String&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="170" x="480" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-13" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;br&gt;BailRecord&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- bail_id : int&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- bail_amount : Decimal&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- status : String&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="480" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-14" edge="1" parent="1" source="M2idaDnVwaQxPrkLA32n-7" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1.015;exitY=0.587;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;exitPerimeter=0;" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="266" y="330" as="sourcePoint" />
+            <mxPoint x="480" y="331" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-15" edge="1" parent="1" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1.015;exitY=0.587;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;exitPerimeter=0;" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="252" y="502" as="sourcePoint" />
+            <mxPoint x="480" y="500" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-16" edge="1" parent="1" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1.015;exitY=0.587;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;exitPerimeter=0;" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="252" y="692" as="sourcePoint" />
+            <mxPoint x="480" y="690" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-17" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="use" vertex="1">
+          <mxGeometry height="30" width="60" x="330" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-18" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="use" vertex="1">
+          <mxGeometry height="30" width="60" x="320" y="470" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-19" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="use" vertex="1">
+          <mxGeometry height="30" width="60" x="310" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-20" parent="1" style="shape=umlFrame;whiteSpace=wrap;html=1;pointerEvents=0;" value="Forensic" vertex="1">
+          <mxGeometry height="230" width="640" x="50" y="820" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-21" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Forensic Manager&lt;br&gt;&amp;lt;&amp;lt;controller&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ requestAnalysis();&lt;br&gt;+updateReportStatus();&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="130" width="180" x="90" y="880" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-22" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Forensic Request&lt;br&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- request_id : int&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- case_id : int&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- examination_purpose : String&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- status : String&lt;/p&gt;" vertex="1">
+          <mxGeometry height="110" width="175" x="485" y="880" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-24" edge="1" parent="1" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="271" y="934.5" as="sourcePoint" />
+            <mxPoint x="485" y="935.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-25" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&amp;lt;&amp;lt;use&amp;gt;&amp;gt;" vertex="1">
+          <mxGeometry height="30" width="60" x="330" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-26" parent="1" style="shape=umlFrame;whiteSpace=wrap;html=1;pointerEvents=0;" value="Audit" vertex="1">
+          <mxGeometry height="230" width="640" x="50" y="1070" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-27" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Audit Manager&lt;br&gt;&amp;lt;&amp;lt;controller&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ logActivity()&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;+ queryLogs()&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;&lt;br&gt;&lt;/p&gt;" vertex="1">
+          <mxGeometry height="130" width="180" x="90" y="1120" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-28" parent="1" style="verticalAlign=top;align=left;overflow=fill;html=1;whiteSpace=wrap;" value="&lt;p style=&quot;margin:0px;margin-top:4px;text-align:center;&quot;&gt;&lt;b&gt;Audit Log&lt;br&gt;&amp;lt;&amp;lt;entity&amp;gt;&amp;gt;&lt;/b&gt;&lt;/p&gt;&lt;hr size=&quot;1&quot; style=&quot;border-style:solid;&quot;&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- log_id : int&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- action : string&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- table_name : String&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;- changed_by : int&lt;/p&gt;&lt;p style=&quot;margin:0px;margin-left:4px;&quot;&gt;-timestamp : DateTime&lt;/p&gt;" vertex="1">
+          <mxGeometry height="120" width="175" x="485" y="1130" as="geometry" />
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-29" edge="1" parent="1" style="endArrow=block;dashed=1;endFill=0;endSize=12;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.022;entryY=0.42;entryDx=0;entryDy=0;entryPerimeter=0;" value="">
+          <mxGeometry relative="1" width="160" as="geometry">
+            <mxPoint x="270" y="1184.5" as="sourcePoint" />
+            <mxPoint x="484" y="1185.5" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="M2idaDnVwaQxPrkLA32n-30" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&amp;lt;&amp;lt;use&amp;gt;&amp;gt;" vertex="1">
+          <mxGeometry height="30" width="60" x="320" y="1150" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

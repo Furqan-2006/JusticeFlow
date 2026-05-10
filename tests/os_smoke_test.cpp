@@ -1,5 +1,5 @@
 #include "os_layer/os_layer.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../src/system/shr_infra/auth/include/auth_module.h"
 
 #include <gtest/gtest.h>
 #include <thread>

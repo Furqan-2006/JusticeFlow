@@ -1,194 +1,219 @@
 justiceflow/
 │
-├── dashboard
-|   ├── app.py                      // Flask routes + views
-|   ├── db.py                       // psycopg2 connection (for direct DB queries if needed)
-|   │
-|   ├── client/                     // Unix socket client to C++ backend
-|   │   ├── __init__.py
-|   │   ├── socket_client.py        // Connect to /tmp/justiceflow.sock
-|   │   ├── request_builder.py      // Build JSON commands
-|   │   └── response_parser.py      // Parse C++ responses
-|   │
-|   ├── services/                   // Business logic layer
-|   │   ├── __init__.py
-|   │   ├── auth_service.py         // Login, logout (calls C++ via socket)
-|   │   ├── case_service.py         // Create/view cases
-|   │   ├── duty_service.py         // Assign duties
-|   │   └── officer_service.py      // Officer management
-|   │
-|   ├── templates/
-|   │   ├── dashboard.html
-|   │   ├── os_metrics.html
-|   │   ├── ai_status.html
-|   │   ├── analytics.html
-|   │   ├── login.html              // Login page
-|   │   ├── cases.html              // Cases list
-|   │   └── duties.html             // Duties assignment
-|   │
-|   ├── static/
-|   │   ├── js/
-|   │   │   ├── charts.js
-|   │   │   ├── live_updates.js
-|   │   │   └── socket_client.js    // WebSocket/polling for real-time updates
-|   │   └── css/
-|   │       └── styles.css
-|   │
-|   ├── requirements.txt            // requests, python-socketio, etc.
-|   ├── run.py
-|   └── README.md                   // Document socket protocol
+├── dashboard  // Flask or Streamlit
 |
 ├── db/
+|   ├── data_generator/
+|   |   └── generate_data.py
+|   |   
+|   ├── schema/
+|       ├── 00_schema.sql
+|       ├── 01_types.sql
+|       ├── 02_tables.sql
+|       ├── 03_functions.sql
+|       ├── 04_triggers.sql
+|       ├── 05_indexes.sql
+|       ├── 06_permissions.sql
+|       └── schema_patcher.sql
+|       
 ├── docs/
 |
 ├── src/
-|
-├── api_gateway/              // ← NEW: Flask ↔ C++ bridge /     dispatcher layer
-|   │   ├── include/
-|   │   │   ├── api_gateway.h     // Request dispatcher
-|   │   │   ├── command_router.h  // Routes to subsystems
-|   │   │   └── auth_validator.h  // Token + permission checks
-|   │   ├── src/
-|   │   │   ├── api_gateway.cpp     // Init + main loop
-|   │   │   ├── command_router.cpp  // Subsystem routing logic
-|   │   │   └── auth_validator.cpp  // Auth checks
-|   │   │
-|   │   └── README.md
 |   |
-|   ├── ai_agents/
-|   |   ├── hotspot_agent.py
-|   |   ├── priority_agent.py
-|   |   └── workload.py
-|   |   
-|   ├── common/
-|   |   ├── common.h
-|   |   ├── constants.h
-|   |   ├── dbconfig.h
-|   |   ├── ipc_types.h
-|   |   └── logger.h
-|   |   
-|   ├── os_layer/
-|   │   ├── scheduler/            // Furqan (control plane)
-|   |   |   ├── include/
-|   │   │   |   ├── scheduler_module.h      // umbrella the other headers for os_layer.h
-|   │   │   |   ├── scheduler.h
-|   │   │   |   ├── daemon.h
-|   │   │   |   ├── timer.h
-|   │   │   |   ├── job_executor.h
-|   │   │   |   ├── process_spawner.h
-|   │   │   |   └── signal_handler.h
-|   |   |   ├── src/
-|   │   │       ├── scheduler.cpp
-|   │   │       ├── daemon.cpp            // double-fork + setsid
-|   │   │       ├── timer.cpp             // SIGALRM + setitimer
-|   │   │       ├── job_executor.cpp      // runs DB + AI jobs
-|   │   │       ├── process_spawner.cpp   // fork + exec agents
-|   │   │       └── signal_handler.cpp    // SIGCHLD, SIGALRM
-|   │   │
-|   │   ├── ipc/                  // Abdullah (data plane)
-|   |   |   ├── include/
-|   │   │   |   ├── ipc_module.h           // umbrella the other headers for os_layer.h
-|   │   │   |   ├── ipc_manager.h
-|   │   │   |   ├── unix_socket.h
-|   │   │   |   ├── fifo.h
-|   │   │   |   ├── shared_memory.h
-|   │   │   |   ├── shm_layout.h          // shared struct layout
-|   │   │   |   ├── domain_socket.h       // Unix domain socket listener
-|   |   |   |   └── socket_request.h      // request/response types
-|   |   |   ├── src/
-|   │   │       ├── ipc_manager.cpp       // unified interface
-|   │   │       ├── unix_socket.cpp       // PostgreSQL (libpq)
-|   │   │       ├── fifo.cpp              // mkfifo for agents
-|   │   │       ├── shared_memory.cpp     // shm_open + mmap
-|   │   │       ├── domain_socket.cpp     // OS-level IPC (same as Unix sockets to Postgres)
-|   |   |       └── socket_request.cpp    // Request/response serialization is data plane concern
-|   │   │
-|   │   ├── threading/           // Abu Bakar (execution layer)
-|   |   |   ├── include/
-|   │   │   |   ├── threading_module.h     // umbrella the other headers for os_layer.h
-|   │   │   |   ├── thread_pool.h
-|   │   │   |   ├── worker.h
-|   │   │   |   ├── session_manager.h
-|   |   |   |   ├── connection_gate.h
-|   │   │   |   └── sync.h               // mutex, sem, cond wrappers
-|   |   |   ├── src/
-|   │   │       ├── thread_pool.cpp
-|   │   │       ├── worker.cpp
-|   │   │       ├── session_manager.cpp
-|   │   │       └── connection_gate.cpp  // semaphore limiter
-|   │   │
-|   │   ├── memory/              // shared responsibility
-|   |   |   ├── include/
-|   │   │   |   ├── mmap_handler.h
-|   │   │   |   └── mlock_guard.h
-|   |   |   ├── src/
-|   │   │       ├── mmap_handler.cpp
-|   │   │       └── mlock_guard.cpp
-|   │   │
-|   │   ├── process/             // shared core utilities
-|   |   |   ├── include/
-|   │   │   |   ├── process_manager.h
-|   │   │   |   └── process_registry.h
-|   |   |   ├── src/
-|   │   │       ├── process_manager.cpp
-|   │   │       └── process_registry.cpp
-|   │   │
-|   |   ├── README.md            // OS layer overview 
-|   |   ├── DESIGN.md            // process topology, ipc diagram, how everything starts/stops
-|   │   └── os_layer.h           // top-level interface
+|   ├── api_gateway/              // ← NEW: Flask ↔ C++ bridge /     dispatcher layer
+|   |   │   ├── include/
+|   |   │   │   ├── api_gateway.h     // Request dispatcher
+|   |   │   │   ├── command_router.h  // Routes to subsystems
+|   |   │   │   └── auth_validator.h  // Token + permission checks
+|   |   │   ├── src/
+|   |   │   │   ├── api_gateway.cpp     // Init + main loop
+|   |   │   │   ├── command_router.cpp  // Subsystem routing logic
+|   |   │   │   └── auth_validator.cpp  // Auth checks
+|   |   │   │
+|   |   │   └── README.md
+|   |   |
+|   |   ├── ai_agents/
+|   |   |   ├── hotspot_agent.py
+|   |   |   ├── priority_agent.py
+|   |   |   └── workload.py
+|   |   |   
+|   |   ├── common/
+|   |   |   ├── common.h
+|   |   |   ├── constants.h
+|   |   |   ├── dbconfig.h
+|   |   |   ├── ipc_types.h
+|   |   |   └── logger.h
+|   |   |   
+|   |   ├── interface/
+|   |   |   ├── cli.h           // main interface (performs CRUD, configuration etc)
+|   |   |   └── cli.cpp
+|   |   |   
+|   |   ├── os_layer/
+|   |   │   ├── scheduler/            // Furqan (control plane)
+|   |   |   |   ├── include/
+|   |   │   │   |   ├── scheduler_module.h      // umbrella the other headers for os_layer.h
+|   |   │   │   |   ├── scheduler.h
+|   |   │   │   |   ├── daemon.h
+|   |   │   │   |   ├── timer.h
+|   |   │   │   |   ├── job_executor.h
+|   |   │   │   |   ├── process_spawner.h
+|   |   │   │   |   └── signal_handler.h
+|   |   |   |   ├── src/
+|   |   │   │       ├── scheduler.cpp
+|   |   │   │       ├── daemon.cpp            // double-fork + setsid
+|   |   │   │       ├── timer.cpp             // SIGALRM + setitimer
+|   |   │   │       ├── job_executor.cpp      // runs DB + AI jobs
+|   |   │   │       ├── process_spawner.cpp   // fork + exec agents
+|   |   │   │       └── signal_handler.cpp    // SIGCHLD, SIGALRM
+|   |   │   │
+|   |   │   ├── ipc/                  // Abdullah (data plane)
+|   |   |   |   ├── include/
+|   |   │   │   |   ├── ipc_module.h           // umbrella the other headers for os_layer.h
+|   |   │   │   |   ├── ipc_manager.h
+|   |   │   │   |   ├── unix_socket.h
+|   |   │   │   |   ├── fifo.h
+|   |   │   │   |   ├── shared_memory.h
+|   |   │   │   |   ├── shm_layout.h          // shared struct layout
+|   |   │   │   |   ├── domain_socket.h       // Unix domain socket listener
+|   |   |   |   |   └── socket_request.h      // request/response types
+|   |   |   |   ├── src/
+|   |   │   │       ├── ipc_manager.cpp       // unified interface
+|   |   │   │       ├── unix_socket.cpp       // PostgreSQL (libpq)
+|   |   │   │       ├── fifo.cpp              // mkfifo for agents
+|   |   │   │       ├── shared_memory.cpp     // shm_open + mmap
+|   |   │   │       ├── domain_socket.cpp     // OS-level IPC (same as Unix sockets to Postgres)
+|   |   |   |       └── socket_request.cpp    // Request/response serialization is data plane concern
+|   |   │   │
+|   |   │   ├── threading/           // Abu Bakar (execution layer)
+|   |   |   |   ├── include/
+|   |   │   │   |   ├── threading_module.h     // umbrella the other headers for os_layer.h
+|   |   │   │   |   ├── thread_pool.h
+|   |   │   │   |   ├── worker.h
+|   |   │   │   |   ├── session_manager.h
+|   |   |   |   |   ├── connection_gate.h
+|   |   │   │   |   └── sync.h               // mutex, sem, cond wrappers
+|   |   |   |   ├── src/
+|   |   │   │       ├── thread_pool.cpp
+|   |   │   │       ├── worker.cpp
+|   |   │   │       ├── session_manager.cpp
+|   |   │   │       └── connection_gate.cpp  // semaphore limiter
+|   |   │   │
+|   |   │   ├── memory/              // shared responsibility
+|   |   |   |   ├── include/
+|   |   │   │   |   ├── mmap_handler.h
+|   |   │   │   |   └── mlock_guard.h
+|   |   |   |   ├── src/
+|   |   │   │       ├── mmap_handler.cpp
+|   |   │   │       └── mlock_guard.cpp
+|   |   │   │
+|   |   │   ├── process/             // shared core utilities
+|   |   |   |   ├── include/
+|   |   │   │   |   ├── process_manager.h
+|   |   │   │   |   └── process_registry.h
+|   |   |   |   ├── src/
+|   |   │   │       ├── process_manager.cpp
+|   |   │   │       └── process_registry.cpp
+|   |   │   │
+|   |   |   ├── README.md            // OS layer overview 
+|   |   |   ├── DESIGN.md            // process topology, ipc diagram, how everything starts/stops
+|   |   │   └── os_layer.h           // top-level interface
+|   |   |
+|   |   |
+|   |   ├── system/              // system layer 
+|   |   |   |
+|   |   |   ├── shr_infra/              // auth and session layer --- shared infrastructure
+|   |   |   │   ├── auth/
+|   |   |   |   |   ├── include/
+|   |   |   │   │   |   ├── auth_manager.h
+|   |   |   │   │   |   ├── auth_module.h
+|   |   |   │   │   |   ├── session_store.h
+|   |   |   │   │   |   ├── duty_cache.h
+|   |   |   │   │   |   └── token_generator.h
+|   |   |   |   |   ├── src/
+|   |   |   │   │       ├── auth_manager.cpp
+|   |   |   │   │       ├── session_store.cpp
+|   |   |   │   │       ├── duty_cache.cpp
+|   |   |   │   │       └── token_generator.cpp
+|   |   |   |
+|   |   |   ├── subsystem1/
+|   |   |   |   ├── include/
+|   |   |   |   |   ├── case_manager.h
+|   |   |   |   |   ├── case_strategy.h
+|   |   |   |   |   ├── evidence_mgr.h
+|   |   |   |   |   ├── observer.h
+|   |   |   |   |   ├── office_mgr.h
+|   |   |   |   |   └── report_factory.h
+|   |   |   |   |     
+|   |   |   |   ├── src/
+|   |   |   |   |   ├── case_manager.cpp
+|   |   |   |   |   ├── case_strategy.cpp
+|   |   |   |   |   ├── evidence_mgr.cpp
+|   |   |   |   |   ├── observer.cpp
+|   |   |   |   |   ├── office_mgr.cpp
+|   |   |   |   |   └── report_factory.cpp
+|   |   |   |   |     
+|   |   |   |   ├── subsystem1.h
+|   |   |   |   └── subsystem1.cpp 
+|   |   |   |   
+|   |   |   ├── subsystem2/
+|   |   |   |   ├── include/
+|   |   |   |   |   ├── controllers/
+|   |   |   |   |   |   ├── CaseManager.h
+|   |   |   |   |   |   ├── EvidenceManager.h
+|   |   |   |   |   |   └── InvestigationManager.h
+|   |   |   |   |   ├── models/
+|   |   |   |   |   |   ├── Case.h
+|   |   |   |   |   |   ├── Evidence.h
+|   |   |   |   |   |   └── ChargeSheet.h
+|   |   |   |   |   ├── patterns/
+|   |   |   |   |   |   ├── ICaseStatusStrategy.h
+|   |   |   |   |   |   └── IEvidenceObserver.h
+|   |   |   |   |   └── s2_types.h
+|   |   |   |   ├── src/ 
+|   |   |   |   |   ├── controllers/
+|   |   |   |   |   |   ├── CaseManager.cpp
+|   |   |   |   |   |   ├── EvidenceManager.cpp
+|   |   |   |   |   |   └── InvestigationManager.cpp
+|   |   |   |   |   ├── models/
+|   |   |   |   |       ├── Case.cpp
+|   |   |   |   |       ├── Evidence.cpp
+|   |   |   |   |       └── ChargeSheet.cpp
+|   |   |   |   ├── subsystem2.h      // public API
+|   |   |   |   └── subsystem2.cpp      // Implementation + routes to managers
+|   |   |   |
+|   |   |   ├── subsystem3/
+|   |   |   |   ├── audit/
+|   |   |   |   │   ├── include/
+|   |   |   |   │   │   ├── audit_manager.h       ← singleton, entry point for all audit queries
+|   |   |   |   │   │   └── audit_query.h         ← stateless query builder, Template Method pattern
+|   |   |   |   │   └── src/
+|   |   |   |   │       ├── audit_manager.cpp
+|   |   |   |   │       └── audit_query.cpp
+|   |   |   |   │
+|   |   |   |   ├── enforcement/
+|   |   |   |   │   ├── include/
+|   |   |   |   │   │   ├── warrant_manager.h     ← warrant state machine + all warrant operations
+|   |   |   |   │   │   ├── arrest_manager.h      ← custody state machine + all arrest operations
+|   |   |   |   │   │   └── bail_manager.h        ← bail state machine + all bail operations
+|   |   |   |   │   └── src/
+|   |   |   |   │       ├── warrant_manager.cpp
+|   |   |   |   │       ├── arrest_manager.cpp
+|   |   |   |   │       └── bail_manager.cpp
+|   |   |   |   │
+|   |   |   |   ├── forensic/
+|   |   |   |   │   ├── include/
+|   |   |   |   │   │   ├── forensic_manager.h    ← forensic state machine + all 6 operations
+|   |   |   |   │   │   └── forensic_repository.h ← pure DB access layer, Repository pattern
+|   |   |   |   │   └── src/
+|   |   |   |   │       ├── forensic_manager.cpp
+|   |   |   |   │       └── forensic_repository.cpp
+|   |   |   |   │
+|   |   |   |   ├── subsystem3.h                  ← public API
+|   |   |   |   └── subsystem3.cpp                ← Implementation + routing to managers
 |   |
-|   ├── shr_infra/              // auth and session layer --- shared infrastructure
-|   │   ├── auth/
-|   |   |   ├── include/
-|   │   │   |   ├── auth_manager.h
-|   │   │   |   ├── auth_module.h
-|   │   │   |   ├── session_store.h
-|   │   │   |   ├── duty_cache.h
-|   │   │   |   └── token_generator.h
-|   |   |   ├── src/
-|   │   │       ├── auth_manager.cpp
-|   │   │       ├── session_store.cpp
-|   │   │       ├── duty_cache.cpp
-|   │   │       └── token_generator.cpp
-
-|   |
-|   ├── subsystem1/
-|   ├── subsystem2/
-|   ├── subsystem3/
-|   |   ├── audit/
-|   |   │   ├── include/
-|   |   │   │   ├── audit_manager.h       ← singleton, entry point for all audit queries
-|   |   │   │   └── audit_query.h         ← stateless query builder, Template Method pattern
-|   |   │   └── src/
-|   |   │       ├── audit_manager.cpp
-|   |   │       └── audit_query.cpp
-|   |   │
-|   |   ├── enforcement/
-|   |   │   ├── include/
-|   |   │   │   ├── warrant_manager.h     ← warrant state machine + all warrant operations
-|   |   │   │   ├── arrest_manager.h      ← custody state machine + all arrest operations
-|   |   │   │   └── bail_manager.h        ← bail state machine + all bail operations
-|   |   │   └── src/
-|   |   │       ├── warrant_manager.cpp
-|   |   │       ├── arrest_manager.cpp
-|   |   │       └── bail_manager.cpp
-|   |   │
-|   |   ├── forensic/
-|   |   │   ├── include/
-|   |   │   │   ├── forensic_manager.h    ← forensic state machine + all 6 operations
-|   |   │   │   └── forensic_repository.h ← pure DB access layer, Repository pattern
-|   |   │   └── src/
-|   |   │       ├── forensic_manager.cpp
-|   |   │       └── forensic_repository.cpp
-|   |   │
-|   |   ├── sql/
-|   |   │   ├── audit_triggers.sql        ← SECURITY DEFINER trigger + immutability enforcement
-|   |   │   ├── enforcement_jobs.sql      ← expire_warrants() + expire_bail_records() SQL functions
-|   |   │   └── forensic_triggers.sql     ← evidence status sync triggers
-|   |   │
-|   |   ├── subsystem3.h                  ← public API
-|   |   └── subsystem3.cpp                ← Implementation + routing to managers
-|
+|   ├── main.h          ← orchestrator 
+|   └── main.cpp
+|   
 ├── tests/
 |   ├── superviser_test.cpp
 |   ├── os_smoke_test.cpp

@@ -42,6 +42,7 @@ namespace ipc
         UnixSocket(const UnixSocket &) = delete;
         UnixSocket &operator=(const UnixSocket &) = delete;
 
+        PGconn *getConnection() const;
         /**
          * Establishes connection to PostgreSQL via the provided connection string.
          * Must be called and return OK before any execute() or isHealthy() calls.

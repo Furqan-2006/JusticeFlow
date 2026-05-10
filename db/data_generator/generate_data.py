@@ -435,9 +435,9 @@ def gen_officers(cur, persons: list, stations: list) -> list:
     sql = """
         INSERT INTO Officers
             (cnic, belt_number, joining_rank, current_rank, bps_scale,
-             joining_date, station_id, status, qualification, retirement_date)
+             joining_date, station_id, status, qualification, retirement_date, password_hash, last_login)
         VALUES (%s,%s,%s::officer_rank_enum,%s::officer_rank_enum,
-                %s,%s,%s,%s::officer_status_enum,%s,%s)
+                %s,%s,%s,%s::officer_status_enum,%s,%s,%s,%s)
         RETURNING officer_id, cnic, current_rank, station_id, status
     """
     rank_pool  = random.choices(OFFICER_RANKS, weights=RANK_W, k=N_OFFICERS)

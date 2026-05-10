@@ -1,6 +1,6 @@
 #include "../include/worker.h"
 #include "../../../os_layer/ipc/include/ipc_manager.h"
-#include "shr_infra/auth/include/auth_module.h"
+#include "../../../src/system/shr_infra/auth/include/auth_module.h"
 #include "common/logger.h"
 
 #include <iostream>
@@ -260,10 +260,10 @@ namespace
      * @param payload_len Payload length
      * @return SessionContext if successful, empty if failed
      */
-    static auth::SessionContext handleLoginRequest(int fd, int thread_id,
+    static JusticeFlow::SessionContext handleLoginRequest(int fd, int thread_id,
                                                    const char *payload, size_t payload_len)
     {
-        auth::SessionContext empty_session = {};
+        JusticeFlow::SessionContext empty_session = {};
 
         // Parse payload: [cnic null term][password null term]
         const char *cnic_start = payload;
@@ -291,7 +291,7 @@ namespace
         std::string password(password_start, password_end);
 
         // Call AuthManager::login()
-        auth::SessionContext session;
+        JusticeFlow::SessionContext session;
         JusticeFlow::ResultCode auth_result =
             auth::AuthManager::getInstance().login(cnic, password, session);
 
@@ -307,13 +307,13 @@ namespace
         }
 
         // Send token back to client
-        std::string token_response = session.token;
+        std::string token_response = session.sessionToken;
         sendFrame(fd, MSG_TYPE_AUTH_RESPONSE, token_response.c_str(), token_response.length());
 
         char log_buf[256];
         std::snprintf(log_buf, sizeof(log_buf),
                       "[Worker %d] Officer %d authenticated successfully",
-                      thread_id, session.officer_id);
+                      thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
         Logger::info(log_buf);
 
         return session;
@@ -340,7 +340,7 @@ namespace
      */
     static void processClientRequests(int fd, int thread_id)
     {
-        auth::SessionContext session = {};
+        JusticeFlow::SessionContext session = {};
         bool authenticated = false;
 
         char payload_buffer[MAX_FRAME_SIZE];
@@ -372,15 +372,15 @@ namespace
                 }
 
                 session = handleLoginRequest(fd, thread_id, payload_buffer, payload_len);
-                if (session.officer_id > 0)
+                if (session.belt_number.empty() ? session.officerId > 0 : std::stoi(session.belt_number) > 0)
                 {
                     authenticated = true;
 
                     // Register session in threading session_manager for monitoring
                     SessionContext ctx = {
-                        session.officer_id,
+                        session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number),
                         fd,
-                        session.login_timestamp};
+                        session.createdAt};
                     SessionManager::getInstance().register_session(thread_id, ctx);
                 }
                 continue;
@@ -398,16 +398,16 @@ namespace
             if (msg_type == MSG_TYPE_QUERY_REQUEST)
             {
                 // CRITICAL FIX #3.1: Validate session hasn't expired
-                auth::SessionContext validated_session;
+                JusticeFlow::SessionContext validated_session;
                 JusticeFlow::ResultCode validate_result =
-                    auth::AuthManager::getInstance().validateToken(session.token, validated_session);
+                    auth::AuthManager::getInstance().validateToken(session.sessionToken, validated_session);
 
                 if (validate_result != JusticeFlow::ResultCode::OK)
                 {
                     char log_buf[128];
                     std::snprintf(log_buf, sizeof(log_buf),
                                   "[Worker %d] Session validation failed for officer %d",
-                                  thread_id, session.officer_id);
+                                  thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
                     Logger::error(log_buf);
 
                     if (validate_result == JusticeFlow::ResultCode::SESSION_EXPIRED)
@@ -443,7 +443,7 @@ namespace
                 char log_buf[512];
                 std::snprintf(log_buf, sizeof(log_buf),
                               "[Worker %d] Officer %d executing query: %.50s...",
-                              thread_id, session.officer_id, query.c_str());
+                              thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number), query.c_str());
                 Logger::debug(log_buf);
 
                 // The Critical Section — acquire DB slot, execute query, send results
@@ -453,11 +453,11 @@ namespace
                     char db_log[256];
                     std::snprintf(db_log, sizeof(db_log),
                                   "[Worker %d] Officer %d acquired DB slot",
-                                  thread_id, session.officer_id);
+                                  thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
                     Logger::info(db_log);
 
                     // COMPLETED TODO Phase 6: Execute query and serialize results
-                    executeAndSendQuery(fd, query, session.officer_id);
+                    executeAndSendQuery(fd, query, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
 
                 } // SemGuard released here — DB slot available for next officer
 
@@ -470,7 +470,7 @@ namespace
                     char log_buf[128];
                     std::snprintf(log_buf, sizeof(log_buf),
                                   "[Worker %d] Session refresh failed for officer %d",
-                                  thread_id, session.officer_id);
+                                  thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
                     Logger::error(log_buf);
                     // Continue anyway — session may still be valid
                 }
@@ -489,7 +489,7 @@ namespace
                     char log_buf[128];
                     std::snprintf(log_buf, sizeof(log_buf),
                                   "[Worker %d] Officer %d logged out gracefully",
-                                  thread_id, session.officer_id);
+                                  thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
                     Logger::info(log_buf);
                 }
 
@@ -510,7 +510,7 @@ namespace
             char log_buf[128];
             std::snprintf(log_buf, sizeof(log_buf),
                           "[Worker %d] Officer %d session cleaned up",
-                          thread_id, session.officer_id);
+                          thread_id, session.belt_number.empty() ? session.officerId : std::stoi(session.belt_number));
             Logger::info(log_buf);
         }
     }

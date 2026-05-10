@@ -1,0 +1,59 @@
+# tests/Makefile.test
+# Include this in the main Makefile with: include tests/Makefile.test
+
+# ============================================================================
+# Test Configuration
+# ============================================================================
+
+TEST_DIR        := tests
+BUILD_TEST_DIR  := $(BUILD_DIR)/tests
+TEST_SOURCES    := $(wildcard $(TEST_DIR)/*_test.cpp) $(TEST_DIR)/test_common.cpp
+TEST_OBJECTS    := $(patsubst $(TEST_DIR)/%.cpp,$(BUILD_TEST_DIR)/%.o,$(TEST_SOURCES))
+
+# ============================================================================
+# Test Targets
+# ============================================================================
+
+.PHONY: test test-verbose test-verbose-leak test-coverage
+
+test: $(BUILD_DIR)/test_suite
+	@echo "Running test suite..."
+	@$(BUILD_DIR)/test_suite --gtest_shuffle
+
+test-verbose: $(BUILD_DIR)/test_suite
+	@echo "Running test suite (verbose)..."
+	@$(BUILD_DIR)/test_suite --gtest_print_time=1 --gtest_verbosity=verbose
+
+test-verbose-leak: $(BUILD_DIR)/test_suite
+	@echo "Running test suite with leak detection..."
+	@valgrind --leak-check=full $(BUILD_DIR)/test_suite --gtest_print_time=1
+
+test-coverage: $(BUILD_DIR)/test_suite
+	@echo "Generating coverage report..."
+	@lcov --directory $(BUILD_DIR) --zerocounters
+	@$(BUILD_DIR)/test_suite
+	@lcov --directory $(BUILD_DIR) --capture --output-file $(BUILD_DIR)/coverage.info
+	@genhtml $(BUILD_DIR)/coverage.info --output-directory $(BUILD_DIR)/coverage_report
+	@echo "Coverage report: $(BUILD_DIR)/coverage_report/index.html"
+
+# ============================================================================
+# Test Executable
+# ============================================================================
+
+$(BUILD_DIR)/test_suite: $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o,$(OBJECTS)) $(TEST_OBJECTS) | $(BUILD_DIR)
+	@echo "Linking test suite..."
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(OPTIMIZE) -o $@ $^ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main 2>&1 || \
+		echo "WARNING: Test build failed (ensure libgtest-dev is installed)"
+
+# ============================================================================
+# Test Object Files
+# ============================================================================
+
+$(BUILD_TEST_DIR)/%.o: $(TEST_DIR)/%.cpp | $(BUILD_TEST_DIR)
+	@mkdir -p $(@D)
+	@echo "Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(OPTIMIZE) $(INCLUDE_DIRS) -I$(TEST_DIR) -c $< -o $@
+
+$(BUILD_TEST_DIR):
+	@mkdir -p $@

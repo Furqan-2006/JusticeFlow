@@ -76,6 +76,9 @@ namespace JusticeFlow
         int bpsScale;
         int stationId;
         OfficerStatus status;
+        std::string password_hash;
+        time_t last_login;
+        
     };
 
     struct Case
