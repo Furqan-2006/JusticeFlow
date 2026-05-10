@@ -16,7 +16,7 @@ namespace test_utils
     {
         JusticeFlow::Case test_case;
         const int suffix = next_suffix();
-        test_case.case_id = suffix;
+        test_case.case_id = 0; // 0 signals that the DB insert did not succeed
         test_case.fir_number = "FIR-TEST-" + std::to_string(suffix);
         test_case.case_type = JusticeFlow::CaseType::MURDER;
         test_case.case_status = JusticeFlow::CaseStatus::REGISTERED;
