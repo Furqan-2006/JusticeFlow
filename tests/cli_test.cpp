@@ -118,13 +118,13 @@ TEST_F(CLITest, LogoutInvalidatesToken)
 TEST_F(CLITest, ListCasesByStation)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
 
     auto &sys = system_layer::SystemManager::getInstance();
-    auto result = sys.cases().getCasesByStation(db.getConnection(), 1);
+    auto result = sys.cases().getCasesByStation(db.getConnection(), 451);
 
     EXPECT_TRUE(result.ok());
 }
@@ -132,7 +132,7 @@ TEST_F(CLITest, ListCasesByStation)
 TEST_F(CLITest, GetCaseById)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -140,7 +140,7 @@ TEST_F(CLITest, GetCaseById)
     auto &sys = system_layer::SystemManager::getInstance();
 
     // Create test case first
-    auto test_case = test_utils::createTestCase(db.getConnection(), 1);
+    auto test_case = test_utils::createTestCase(db.getConnection(), 930);
 
     // Now retrieve it
     auto result = sys.cases().getCaseById(db.getConnection(), test_case.case_id);
@@ -152,7 +152,7 @@ TEST_F(CLITest, GetCaseById)
 TEST_F(CLITest, GetNonExistentCase)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -166,14 +166,14 @@ TEST_F(CLITest, GetNonExistentCase)
 TEST_F(CLITest, GetCasesByStatus)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
 
     auto &sys = system_layer::SystemManager::getInstance();
     auto result = sys.cases().getCasesByStatus(
-        db.getConnection(), 1, JusticeFlow::CaseStatus::UNDER_INVESTIGATION);
+        db.getConnection(), 460, JusticeFlow::CaseStatus::UNDER_INVESTIGATION);
 
     EXPECT_TRUE(result.ok());
 }
@@ -284,6 +284,10 @@ TEST(OutputFormattingTest, JsonFormat)
 TEST_F(CLITest, DatabaseConnectionFailure)
 {
     MockDatabase db;
+
+    // EXPECT_CALL(db, executeQuery)
+    //     .WillOnce(Return(JusticeFlow::ResultCode::DB_ERROR));
+
     bool connected = db.connect("host=invalid_host dbname=invalid_db");
 
     EXPECT_FALSE(connected);
