@@ -19,7 +19,7 @@ TEST_F(SystemIntegrationTest, LoginToLogoutFlow)
     auto &sys = system_layer::SystemManager::getInstance();
 
     // Step 1: Login
-    auto login_result = sys.auth().login("12345-6789012-3", "password123");
+    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
     EXPECT_TRUE(login_result.ok());
 
     std::string token = login_result.value;
@@ -40,7 +40,7 @@ TEST_F(SystemIntegrationTest, LoginToLogoutFlow)
 TEST_F(SystemIntegrationTest, CaseLifecycle)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -88,7 +88,7 @@ TEST_F(SystemIntegrationTest, PartialInitRecovery)
 TEST_F(SystemIntegrationTest, CaseDataConsistency)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -112,7 +112,7 @@ TEST_F(SystemIntegrationTest, CaseDataConsistency)
 TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -122,22 +122,22 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
 
     int first_id = -1;
     int second_id = -1;
-    std::thread t1([&]() {
+    std::thread t1([&]()
+                   {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::MURDER, time(nullptr), "A", "A", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
-            first_id = r.value;
-    });
-    std::thread t2([&]() {
+            first_id = r.value; });
+    std::thread t2([&]()
+                   {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow_test user=justice_app password=justiceflow123"))
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::ROBBERY, time(nullptr), "B", "B", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
-            second_id = r.value;
-    });
+            second_id = r.value; });
     t1.join();
     t2.join();
 
