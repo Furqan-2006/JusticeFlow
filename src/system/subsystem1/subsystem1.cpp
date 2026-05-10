@@ -151,7 +151,7 @@ namespace subsystem1
 
     JusticeFlow::ResultCode Subsystem1::getOfficerById(PGconn *, int officer_id, JusticeFlow::Officer &out)
     {
-        std::string sql = "SELECT officer_id, belt_number, cnic, currentRank, status FROM officers WHERE officer_id=" +
+        std::string sql = "SELECT officer_id, belt_number, cnic, current_rank, status FROM officers WHERE officer_id=" +
                           std::to_string(officer_id) + ";";
         std::vector<std::vector<std::string>> results;
         auto rc = db().executeQuery(sql, results);
@@ -161,7 +161,8 @@ namespace subsystem1
         out.officerId = std::stoi(results[0][0]);
         out.beltNumber = results[0][1];
         out.cnic = results[0][2];
-        // Fill in other fields as needed...
+        out.currentRank = JusticeFlow::OfficerRank(std::stoi(results[0][3]));
+        out.status = JusticeFlow::OfficerStatus(std::stoi(results[0][4]));
         return rc;
     }
 
@@ -296,7 +297,7 @@ namespace subsystem1
 
     JusticeFlow::ResultCode Subsystem1::getOfficerByCnic(PGconn *, const char *cnic, JusticeFlow::Officer &out)
     {
-        std::string sql = "SELECT officer_id, belt_number, cnic, currentRank, status FROM officers WHERE cnic='" +
+        std::string sql = "SELECT officer_id, belt_number, cnic, current_rank, status FROM officers WHERE cnic='" +
                           std::string(cnic) + "';";
         std::vector<std::vector<std::string>> results;
         auto rc = db().executeQuery(sql, results);
@@ -305,12 +306,14 @@ namespace subsystem1
         out.officerId = std::stoi(results[0][0]);
         out.beltNumber = results[0][1];
         out.cnic = results[0][2];
+        out.currentRank = JusticeFlow::OfficerRank(std::stoi(results[0][3]));
+        out.status = JusticeFlow::OfficerStatus(std::stoi(results[0][4]));
         return rc;
     }
 
     JusticeFlow::ResultCode Subsystem1::getOfficersByStation(PGconn *, int station_id, std::vector<JusticeFlow::Officer> &out)
     {
-        std::string sql = "SELECT officer_id, belt_number, cnic FROM officers WHERE station_id=" +
+        std::string sql = "SELECT officer_id, belt_number, cnic, current_rank, status FROM officers WHERE station_id=" +
                           std::to_string(station_id) + ";";
         std::vector<std::vector<std::string>> results;
         auto rc = db().executeQuery(sql, results);
@@ -318,12 +321,14 @@ namespace subsystem1
             return rc;
         for (const auto &row : results)
         {
-            if (row.size() < 3)
+            if (row.size() < 5)
                 continue;
             JusticeFlow::Officer o{};
             o.officerId = std::stoi(row[0]);
             o.beltNumber = row[1];
             o.cnic = row[2];
+            o.currentRank = JusticeFlow::OfficerRank(std::stoi(row[3]));
+            o.status = JusticeFlow::OfficerStatus(std::stoi(row[4]));
             out.push_back(o);
         }
         return rc;
@@ -332,7 +337,7 @@ namespace subsystem1
     JusticeFlow::ResultCode Subsystem1::getOfficersByStatus(PGconn *, int station_id,
                                                             JusticeFlow::OfficerStatus status, std::vector<JusticeFlow::Officer> &out)
     {
-        std::string sql = "SELECT officer_id, belt_number, cnic FROM officers WHERE station_id=" +
+        std::string sql = "SELECT officer_id, belt_number, cnic, current_rank, status FROM officers WHERE station_id=" +
                           std::to_string(station_id) + " AND status=" +
                           std::to_string(static_cast<int>(status)) + ";";
         std::vector<std::vector<std::string>> results;
@@ -341,12 +346,14 @@ namespace subsystem1
             return rc;
         for (const auto &row : results)
         {
-            if (row.size() < 3)
+            if (row.size() < 5)
                 continue;
             JusticeFlow::Officer o{};
             o.officerId = std::stoi(row[0]);
             o.beltNumber = row[1];
             o.cnic = row[2];
+            o.currentRank = JusticeFlow::OfficerRank(std::stoi(row[3]));
+            o.status = JusticeFlow::OfficerStatus(std::stoi(row[4]));       
             out.push_back(o);
         }
         return rc;

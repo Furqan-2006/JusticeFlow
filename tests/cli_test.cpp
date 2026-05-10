@@ -43,7 +43,7 @@ TEST_F(CLITest, LoginWithValidCredentials)
 
     // This test requires a pre-existing user in the test database
     // In CI/CD, you'd seed this data
-    auto result = sys.auth().login("12345-6789012-3", "password123");
+    auto result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
 
     EXPECT_TRUE(result.ok());
     EXPECT_FALSE(result.value.empty());

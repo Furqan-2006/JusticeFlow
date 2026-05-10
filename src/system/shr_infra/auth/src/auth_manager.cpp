@@ -47,7 +47,7 @@ namespace auth
         // Query: SELECT officer_id, rank FROM officers WHERE cnic = ? AND crypt(?, password_hash) = password_hash
         char query[512];
         std::snprintf(query, sizeof(query),
-                      "SELECT officer_id, rank FROM officers WHERE cnic = '%s' "
+                      "SELECT officer_id, current_rank, last_login FROM officers WHERE cnic = '%s' "
                       "AND crypt('%s', password_hash) = password_hash",
                       cnic.c_str(), password.c_str());
 
