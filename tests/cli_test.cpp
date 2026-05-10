@@ -53,7 +53,7 @@ TEST_F(CLITest, ValidateTokenAfterLogin)
 {
     auto &sys = system_layer::SystemManager::getInstance();
 
-    auto login_result = sys.auth().login("12345-6789012-3", "password123");
+    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
     if (!login_result.ok())
     {
         GTEST_SKIP() << "Login failed, cannot test token validation";
@@ -82,7 +82,7 @@ TEST_F(CLITest, LogoutInvalidatesToken)
 {
     auto &sys = system_layer::SystemManager::getInstance();
 
-    auto login_result = sys.auth().login("12345-6789012-3", "password123");
+    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
     if (!login_result.ok())
     {
         GTEST_SKIP() << "Login failed";
