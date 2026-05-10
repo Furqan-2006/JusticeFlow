@@ -17,7 +17,7 @@ INSTALL_PREFIX  := /usr/local
 
 # Compiler settings
 CXX             := g++
-CXXFLAGS        := -std=c++17 -Wall -Wextra -fPIC -pthread
+CXXFLAGS        := -std=c++17 -Wall -Wextra -Werror -fPIC -pthread
 CXXFLAGS_DEBUG  := $(CXXFLAGS) -g -O0 -DDEBUG
 CXXFLAGS_RELEASE:= $(CXXFLAGS) -O3 -DNDEBUG
 

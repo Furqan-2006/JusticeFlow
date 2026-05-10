@@ -73,6 +73,12 @@ namespace audit
             return ResultCode::OK;
         }
 
+        if (conninfo == nullptr || conninfo[0] == '\0')
+        {
+            Logger::error("audit_manager: Empty conninfo");
+            return ResultCode::DB_ERROR;
+        }
+
         // Store conninfo for future reconnect attempts
         std::strncpy(conninfo_, conninfo, sizeof(conninfo_) - 1);
         conninfo_[sizeof(conninfo_) - 1] = '\0';

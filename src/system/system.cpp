@@ -50,6 +50,9 @@
 
 #include "system.h"
 #include "common/logger.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace system_layer
 {
@@ -118,6 +121,85 @@ namespace system_layer
             if (rc == JusticeFlow::ResultCode::OK)
                 return SystemResult<void>::success();
             return SystemResult<void>::failure(rc);
+        }
+
+        static JusticeFlow::ResultCode mapPgFailure(PGconn *conn, PGresult *res)
+        {
+            const char *state = res ? PQresultErrorField(res, PG_DIAG_SQLSTATE) : nullptr;
+            if (state != nullptr)
+            {
+                if (std::strcmp(state, "23505") == 0)
+                    return JusticeFlow::ResultCode::ALREADY_EXISTS;
+                if (std::strcmp(state, "23503") == 0)
+                    return JusticeFlow::ResultCode::FOREIGN_KEY_VIOLATION;
+                if (std::strcmp(state, "22000") == 0 || std::strcmp(state, "22P02") == 0)
+                    return JusticeFlow::ResultCode::INVALID_INPUT;
+            }
+            Logger::error(res ? PQresultErrorMessage(res) : PQerrorMessage(conn));
+            return JusticeFlow::ResultCode::DB_ERROR;
+        }
+
+        static const char *toCaseTypeEnum(JusticeFlow::CaseType t)
+        {
+            static const char *names[] = {
+                "MURDER", "ATTEMPTED_MURDER", "MANSLAUGHTER", "KIDNAPPING", "HUMAN_TRAFFICKING",
+                "ROBBERY", "ARMED_ROBBERY", "ASSAULT", "AGGRAVATED_ASSAULT", "RAPE",
+                "SEXUAL_ASSAULT", "BURGLARY", "HOME_INVASION", "ARSON", "VANDALISM",
+                "DRUG_TRAFFICKING", "DRUG_POSSESSION", "TERRORISM", "EXTORTION", "GANG_ACTIVITY",
+                "THEFT", "FRAUD", "CYBERCRIME", "HIT_AND_RUN", "VEHICLE_THEFT",
+                "DOMESTIC_VIOLENCE", "HARASSMENT", "BRIBERY", "FORGERY", "PUBLIC_DISTURBANCE"};
+            const int idx = static_cast<int>(t);
+            return (idx >= 0 && idx < static_cast<int>(sizeof(names) / sizeof(names[0]))) ? names[idx] : "MURDER";
+        }
+
+        static const char *toCaseStatusEnum(JusticeFlow::CaseStatus s)
+        {
+            static const char *names[] = {"REGISTERED", "UNDER_INVESTIGATION", "EVIDENCE_COLLECTED",
+                                          "PENDING_TRIAL", "CLOSED", "REOPENED"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < static_cast<int>(sizeof(names) / sizeof(names[0]))) ? names[idx] : "REGISTERED";
+        }
+
+        static const char *toInjurySeverityEnum(JusticeFlow::InjurySeverity s)
+        {
+            static const char *names[] = {"NONE", "MINOR", "MODERATE", "SEVERE", "FATAL"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 5) ? names[idx] : "NONE";
+        }
+
+        static const char *toVulnerabilityEnum(JusticeFlow::VulnerabilityCategory s)
+        {
+            static const char *names[] = {"NONE", "MINOR", "ELDERLY", "DIFFERENTLY_ABLED", "FEMALE_ALONE"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 5) ? names[idx] : "NONE";
+        }
+
+        static const char *toWitnessProtectionEnum(JusticeFlow::WitnessProtection s)
+        {
+            static const char *names[] = {"NONE", "MONITORED", "PROTECTED", "RELOCATED"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 4) ? names[idx] : "NONE";
+        }
+
+        static const char *toInvolvementTypeEnum(JusticeFlow::InvolvementType s)
+        {
+            static const char *names[] = {"SUSPECT", "ACCUSED", "CONVICTED", "ACQUITTED"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 4) ? names[idx] : "SUSPECT";
+        }
+
+        static const char *toAssociationTypeEnum(JusticeFlow::AssociationType s)
+        {
+            static const char *names[] = {"CO_ACCUSED", "GANG_MEMBER", "ACCOMPLICE", "FAMILY", "KNOWN_ASSOCIATE"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 5) ? names[idx] : "KNOWN_ASSOCIATE";
+        }
+
+        static const char *toVehicleRoleEnum(JusticeFlow::VehicleRole s)
+        {
+            static const char *names[] = {"STOLEN", "USED_IN_CRIME", "ABANDONED", "EVIDENCE", "SUSPECTS_VEHICLE", "VICTIMS_VEHICLE"};
+            const int idx = static_cast<int>(s);
+            return (idx >= 0 && idx < 6) ? names[idx] : "EVIDENCE";
         }
 
     } // namespace detail
@@ -1085,47 +1167,142 @@ namespace system_layer
         double lat, double lon,
         int station_id, const char *cnic)
     {
-        subsystem2::FIRRegistrationRequest req;
-        req.type = type;
-        req.incident_date = filed_time;
-        req.incident_address = address ? std::string(address) : "";
-        req.description = desc ? std::string(desc) : "";
-        req.lat = lat;
-        req.lon = lon;
-        req.station_id = station_id;
-        req.complainant_cnic = cnic ? std::string(cnic) : "";
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK || cnic == nullptr || cnic[0] == '\0')
+            return SystemResult<int>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
 
-        auto result = s2_->registerFIR(req, session);
+        char fir[64], ts_file[32], lat_s[32], lon_s[32], station_s[32], filed_by_s[32];
+        std::snprintf(fir, sizeof(fir), "FIR-%ld-%04d", static_cast<long>(filed_time), std::rand() % 10000);
+        std::snprintf(ts_file, sizeof(ts_file), "%ld", static_cast<long>(filed_time));
+        std::snprintf(lat_s, sizeof(lat_s), "%.6f", lat);
+        std::snprintf(lon_s, sizeof(lon_s), "%.6f", lon);
+        std::snprintf(station_s, sizeof(station_s), "%d", station_id);
+        std::snprintf(filed_by_s, sizeof(filed_by_s), "%d", session.officerId > 0 ? session.officerId : 1);
 
-        // ✅ Null-check before dereferencing
-        if (!result.ok() || !result.value)
-            return SystemResult<int>::failure(result.code);
+        const char *values[] = {fir, detail::toCaseTypeEnum(type), ts_file, address ? address : "",
+                                desc ? desc : "", lat_s, lon_s, station_s, cnic, filed_by_s, ts_file};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO cases (fir_number, case_type, case_status, incident_date, incident_address, incident_description, "
+            "incident_lat, incident_lon, station_id, primary_complainant_cnic, filed_by, filed_at) "
+            "VALUES ($1, $2::case_type_enum, 'REGISTERED', to_timestamp($3::bigint), $4, $5, $6::numeric, $7::numeric, "
+            "$8::bigint, $9, $10::bigint, to_timestamp($11::bigint)) RETURNING case_id",
+            11, nullptr, values, nullptr, nullptr, 0);
 
-        return SystemResult<int>::success(result.value->getCaseId());
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<int>::failure(rc);
+        }
+        int case_id = std::atoi(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        return SystemResult<int>::success(case_id);
     }
 
-    SystemResult<JusticeFlow::Case> CaseFacade::getCaseById(PGconn *, int case_id)
+    SystemResult<JusticeFlow::Case> CaseFacade::getCaseById(PGconn *conn, int case_id)
     {
-        auto result = s2_->fetchCase(case_id);
-        if (!result.ok() || !result.value)
-            return SystemResult<JusticeFlow::Case>::failure(result.code);
-        // Convert subsystem2::Case to JusticeFlow::Case
-        JusticeFlow::Case justiceCase;
-        justiceCase.case_id = result.value->getCaseId();
-        return SystemResult<JusticeFlow::Case>::success(justiceCase);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+        {
+            auto result = s2_->fetchCase(case_id);
+            if (!result.ok() || !result.value)
+                return SystemResult<JusticeFlow::Case>::failure(result.code);
+            JusticeFlow::Case fallback{};
+            fallback.case_id = result.value->getCaseId();
+            return SystemResult<JusticeFlow::Case>::success(std::move(fallback));
+        }
+
+        char case_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        const char *values[] = {case_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT case_id, fir_number, station_id, filed_by FROM cases WHERE case_id = $1::bigint",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<JusticeFlow::Case>::failure(rc);
+        }
+        if (PQntuples(res) == 0)
+        {
+            PQclear(res);
+            return SystemResult<JusticeFlow::Case>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        }
+        JusticeFlow::Case out{};
+        out.case_id = std::atoi(PQgetvalue(res, 0, 0));
+        out.fir_number = PQgetvalue(res, 0, 1);
+        out.station_id = std::atoi(PQgetvalue(res, 0, 2));
+        out.filed_by = std::atoi(PQgetvalue(res, 0, 3));
+        PQclear(res);
+        return SystemResult<JusticeFlow::Case>::success(std::move(out));
     }
 
-    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStation(PGconn *, int station_id)
+    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStation(PGconn *conn, int station_id)
     {
-        // If S2 exposes an appropriate query, call through; otherwise, implement or throw.
-        // Placeholder:
-        return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+
+        char station_s[32];
+        std::snprintf(station_s, sizeof(station_s), "%d", station_id);
+        const char *values[] = {station_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT case_id, fir_number, station_id, filed_by FROM cases WHERE station_id = $1::bigint ORDER BY case_id",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::Case>>::failure(rc);
+        }
+
+        std::vector<JusticeFlow::Case> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::Case c{};
+            c.case_id = std::atoi(PQgetvalue(res, i, 0));
+            c.fir_number = PQgetvalue(res, i, 1);
+            c.station_id = std::atoi(PQgetvalue(res, i, 2));
+            c.filed_by = std::atoi(PQgetvalue(res, i, 3));
+            out.push_back(std::move(c));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::Case>>::success(std::move(out));
     }
 
-    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStatus(PGconn *, int station_id, JusticeFlow::CaseStatus status)
+    SystemResult<std::vector<JusticeFlow::Case>> CaseFacade::getCasesByStatus(PGconn *conn, int station_id, JusticeFlow::CaseStatus status)
     {
-        // If S2 exposes this, call through; otherwise, implement or throw.
-        return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::Case>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+
+        char station_s[32];
+        std::snprintf(station_s, sizeof(station_s), "%d", station_id);
+        const char *values[] = {station_s, detail::toCaseStatusEnum(status)};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT case_id, fir_number, station_id, filed_by FROM cases "
+            "WHERE station_id = $1::bigint AND case_status = $2::case_status_enum ORDER BY case_id",
+            2, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::Case>>::failure(rc);
+        }
+
+        std::vector<JusticeFlow::Case> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::Case c{};
+            c.case_id = std::atoi(PQgetvalue(res, i, 0));
+            c.fir_number = PQgetvalue(res, i, 1);
+            c.station_id = std::atoi(PQgetvalue(res, i, 2));
+            c.filed_by = std::atoi(PQgetvalue(res, i, 3));
+            out.push_back(std::move(c));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::Case>>::success(std::move(out));
     }
 
     SystemResult<void> CaseFacade::updateCaseStatus(PGconn *, const JusticeFlow::SessionContext &, int, JusticeFlow::CaseStatus, const char *)
@@ -1133,9 +1310,28 @@ namespace system_layer
         return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
-    SystemResult<void> CaseFacade::closeCase(PGconn *, const JusticeFlow::SessionContext &, int, const char *)
+    SystemResult<void> CaseFacade::closeCase(PGconn *conn, const JusticeFlow::SessionContext &session, int case_id, const char *reason)
     {
-        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32], by_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        const char *values[] = {case_s, reason ? reason : "Closed", by_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "UPDATE cases SET case_status = 'CLOSED', closed_at = NOW(), closure_reason = $2, approved_by = $3::bigint, updated_at = NOW() "
+            "WHERE case_id = $1::bigint",
+            3, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<void>::failure(rc);
+        }
+        const bool found = std::atoi(PQcmdTuples(res)) > 0;
+        PQclear(res);
+        return found ? SystemResult<void>::success() : SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<void> CaseFacade::reopenCase(PGconn *, const JusticeFlow::SessionContext &, int, const char *)
@@ -1189,15 +1385,62 @@ namespace system_layer
         const char *injury_type, JusticeFlow::InjurySeverity sev,
         JusticeFlow::VulnerabilityCategory vuln, const char *medical_ref)
     {
-        Logger::error("[CaseFacade::addVictim] Not yet implemented (S2 pending).");
-        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK || cnic == nullptr || cnic[0] == '\0')
+            return SystemResult<int>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
+
+        char case_s[32], by_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        const char *values[] = {case_s, cnic, injury_type ? injury_type : "", detail::toInjurySeverityEnum(sev),
+                                detail::toVulnerabilityEnum(vuln), medical_ref ? medical_ref : "", by_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO victims (case_id, person_cnic, injury_type, injury_severity, vulnerability_category, medical_report_ref, added_by) "
+            "VALUES ($1::bigint, $2, $3, $4::injury_severity_enum, $5::vulnerability_category_enum, $6, $7::bigint) RETURNING victim_id",
+            7, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<int>::failure(rc);
+        }
+        int id = std::atoi(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        return SystemResult<int>::success(id);
     }
 
     SystemResult<std::vector<JusticeFlow::Victim>> CaseFacade::getVictimsByCase(
         PGconn *conn, int case_id)
     {
-        Logger::error("[CaseFacade::getVictimsByCase] Not yet implemented (S2 pending).");
-        return SystemResult<std::vector<JusticeFlow::Victim>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::Victim>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        const char *values[] = {case_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT victim_id, case_id, person_cnic, injury_type, medical_report_ref, added_by FROM victims WHERE case_id = $1::bigint ORDER BY victim_id",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::Victim>>::failure(rc);
+        }
+        std::vector<JusticeFlow::Victim> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::Victim v{};
+            v.victim_id = std::atoi(PQgetvalue(res, i, 0));
+            v.case_id = std::atoi(PQgetvalue(res, i, 1));
+            v.person_cnic = PQgetvalue(res, i, 2);
+            v.injury_type = PQgetvalue(res, i, 3);
+            v.medical_report_ref = PQgetvalue(res, i, 4);
+            v.added_by = std::atoi(PQgetvalue(res, i, 5));
+            out.push_back(std::move(v));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::Victim>>::success(std::move(out));
     }
 
     SystemResult<int> CaseFacade::addWitness(
@@ -1206,61 +1449,239 @@ namespace system_layer
         const char *statement, const char *file_path,
         JusticeFlow::WitnessProtection prot, bool conceal)
     {
-        Logger::error("[CaseFacade::addWitness] Not yet implemented (S2 pending).");
-        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK || cnic == nullptr || cnic[0] == '\0')
+            return SystemResult<int>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
+        char case_s[32], by_s[32], conceal_s[2];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        std::snprintf(conceal_s, sizeof(conceal_s), "%d", conceal ? 1 : 0);
+        const char *values[] = {case_s, cnic, statement ? statement : "", file_path ? file_path : "",
+                                detail::toWitnessProtectionEnum(prot), conceal_s, by_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO witnesses (case_id, person_cnic, statement_text, statement_file_path, statement_recorded_at, "
+            "recorded_by, protection_status, is_identity_concealed, added_by) "
+            "VALUES ($1::bigint, $2, NULLIF($3,''), NULLIF($4,''), NOW(), $7::bigint, $5::witness_protection_enum, "
+            "($6::int = 1), $7::bigint) RETURNING witness_id",
+            7, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<int>::failure(rc);
+        }
+        int id = std::atoi(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        return SystemResult<int>::success(id);
     }
 
     SystemResult<void> CaseFacade::updateWitnessProtection(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int witness_id, JusticeFlow::WitnessProtection st)
     {
-        Logger::error("[CaseFacade::updateWitnessProtection] Not yet implemented (S2 pending).");
-        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char witness_s[32], by_s[32];
+        std::snprintf(witness_s, sizeof(witness_s), "%d", witness_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        const char *values[] = {detail::toWitnessProtectionEnum(st), by_s, witness_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "UPDATE witnesses SET protection_status = $1::witness_protection_enum, recorded_by = $2::bigint, updated_at = NOW() "
+            "WHERE witness_id = $3::bigint",
+            3, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<void>::failure(rc);
+        }
+        const bool found = std::atoi(PQcmdTuples(res)) > 0;
+        PQclear(res);
+        return found ? SystemResult<void>::success() : SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
     }
 
     SystemResult<std::vector<JusticeFlow::Witness>> CaseFacade::getWitnessesByCase(
         PGconn *conn, int case_id)
     {
-        Logger::error("[CaseFacade::getWitnessesByCase] Not yet implemented (S2 pending).");
-        return SystemResult<std::vector<JusticeFlow::Witness>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::Witness>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        const char *values[] = {case_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT witness_id, case_id, person_cnic, COALESCE(statement_text,''), COALESCE(statement_file_path,''), "
+            "COALESCE(recorded_by,0), is_identity_concealed, added_by FROM witnesses WHERE case_id = $1::bigint ORDER BY witness_id",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::Witness>>::failure(rc);
+        }
+        std::vector<JusticeFlow::Witness> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::Witness w{};
+            w.witness_id = std::atoi(PQgetvalue(res, i, 0));
+            w.case_id = std::atoi(PQgetvalue(res, i, 1));
+            w.person_cnic = PQgetvalue(res, i, 2);
+            w.statement_text = PQgetvalue(res, i, 3);
+            w.statement_file_path = PQgetvalue(res, i, 4);
+            w.recorded_by = std::atoi(PQgetvalue(res, i, 5));
+            w.is_identity_concealed = std::strcmp(PQgetvalue(res, i, 6), "t") == 0;
+            w.added_by = std::atoi(PQgetvalue(res, i, 7));
+            out.push_back(std::move(w));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::Witness>>::success(std::move(out));
     }
 
     SystemResult<int> CaseFacade::addAccused(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int case_id, const char *cnic, JusticeFlow::InvolvementType inv)
     {
-        Logger::error("[CaseFacade::addAccused] Not yet implemented (S2 pending).");
-        return SystemResult<int>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK || cnic == nullptr || cnic[0] == '\0')
+            return SystemResult<int>::failure(JusticeFlow::ResultCode::INVALID_INPUT);
+        char case_s[32], by_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        const char *values[] = {case_s, cnic, detail::toInvolvementTypeEnum(inv), by_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO accused (case_id, person_cnic, involvement_type, added_by) "
+            "VALUES ($1::bigint, $2, $3::involvement_type_enum, $4::bigint) RETURNING accused_id",
+            4, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<int>::failure(rc);
+        }
+        int id = std::atoi(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        return SystemResult<int>::success(id);
     }
 
     SystemResult<void> CaseFacade::linkAccusedAssociation(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int accused_id, int associated_id, JusticeFlow::AssociationType atype)
     {
-        Logger::error("[CaseFacade::linkAccusedAssociation] Not yet implemented (S2 pending).");
-        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        (void)session;
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char accused_s[32], assoc_s[32];
+        std::snprintf(accused_s, sizeof(accused_s), "%d", accused_id);
+        std::snprintf(assoc_s, sizeof(assoc_s), "%d", associated_id);
+        const char *values[] = {accused_s, assoc_s, detail::toAssociationTypeEnum(atype)};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO accused_associations (accused_id, associated_accused_id, association_type) "
+            "VALUES ($1::bigint, $2::bigint, $3::association_type_enum)",
+            3, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<void>::failure(rc);
+        }
+        PQclear(res);
+        return SystemResult<void>::success();
     }
 
     SystemResult<std::vector<JusticeFlow::Accused>> CaseFacade::getAccusedByCase(
         PGconn *conn, int case_id)
     {
-        Logger::error("[CaseFacade::getAccusedByCase] Not yet implemented (S2 pending).");
-        return SystemResult<std::vector<JusticeFlow::Accused>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::Accused>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        const char *values[] = {case_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT accused_id, case_id, person_cnic, COALESCE(master_accused_cnic,''), added_by FROM accused "
+            "WHERE case_id = $1::bigint ORDER BY accused_id",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::Accused>>::failure(rc);
+        }
+        std::vector<JusticeFlow::Accused> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::Accused a{};
+            a.accused_id = std::atoi(PQgetvalue(res, i, 0));
+            a.case_id = std::atoi(PQgetvalue(res, i, 1));
+            a.person_cnic = PQgetvalue(res, i, 2);
+            a.master_accused_cnic = PQgetvalue(res, i, 3);
+            a.added_by = std::atoi(PQgetvalue(res, i, 4));
+            out.push_back(std::move(a));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::Accused>>::success(std::move(out));
     }
 
     SystemResult<void> CaseFacade::linkVehicleToCase(
         PGconn *conn, const JusticeFlow::SessionContext &session,
         int case_id, int vehicle_id, JusticeFlow::VehicleRole role, const char *notes)
     {
-        Logger::error("[CaseFacade::linkVehicleToCase] Not yet implemented (S2 pending).");
-        return SystemResult<void>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<void>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32], vehicle_s[32], by_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        std::snprintf(vehicle_s, sizeof(vehicle_s), "%d", vehicle_id);
+        std::snprintf(by_s, sizeof(by_s), "%d", session.officerId > 0 ? session.officerId : 1);
+        const char *values[] = {vehicle_s, case_s, detail::toVehicleRoleEnum(role), notes ? notes : "", by_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "INSERT INTO vehicle_cases (vehicle_id, case_id, vehicle_role, condition_notes, added_by) "
+            "VALUES ($1::bigint, $2::bigint, $3::vehicle_role_enum, $4, $5::bigint)",
+            5, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<void>::failure(rc);
+        }
+        PQclear(res);
+        return SystemResult<void>::success();
     }
 
     SystemResult<std::vector<JusticeFlow::VehicleCase>> CaseFacade::getVehiclesByCase(
         PGconn *conn, int case_id)
     {
-        Logger::error("[CaseFacade::getVehiclesByCase] Not yet implemented (S2 pending).");
-        return SystemResult<std::vector<JusticeFlow::VehicleCase>>::failure(JusticeFlow::ResultCode::NOT_FOUND);
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+            return SystemResult<std::vector<JusticeFlow::VehicleCase>>::failure(JusticeFlow::ResultCode::DB_ERROR);
+        char case_s[32];
+        std::snprintf(case_s, sizeof(case_s), "%d", case_id);
+        const char *values[] = {case_s};
+        PGresult *res = PQexecParams(
+            conn,
+            "SELECT vehicle_case_id, vehicle_id, case_id, condition_notes, added_by FROM vehicle_cases "
+            "WHERE case_id = $1::bigint ORDER BY vehicle_case_id",
+            1, nullptr, values, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        {
+            JusticeFlow::ResultCode rc = detail::mapPgFailure(conn, res);
+            PQclear(res);
+            return SystemResult<std::vector<JusticeFlow::VehicleCase>>::failure(rc);
+        }
+        std::vector<JusticeFlow::VehicleCase> out;
+        for (int i = 0; i < PQntuples(res); ++i)
+        {
+            JusticeFlow::VehicleCase v{};
+            v.vehicle_case_id = std::atoi(PQgetvalue(res, i, 0));
+            v.vehicle_id = std::atoi(PQgetvalue(res, i, 1));
+            v.case_id = std::atoi(PQgetvalue(res, i, 2));
+            v.condition_notes = PQgetvalue(res, i, 3);
+            v.added_by = std::atoi(PQgetvalue(res, i, 4));
+            out.push_back(std::move(v));
+        }
+        PQclear(res);
+        return SystemResult<std::vector<JusticeFlow::VehicleCase>>::success(std::move(out));
     }
 
     // =============================================================================

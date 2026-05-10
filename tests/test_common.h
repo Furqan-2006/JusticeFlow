@@ -73,6 +73,20 @@ public:
     bool connect(const std::string &conninfo)
     {
         m_conn = PQconnectdb(conninfo.c_str());
+        if (PQstatus(m_conn) == CONNECTION_OK)
+        {
+            return true;
+        }
+
+        if (m_conn)
+        {
+            PQfinish(m_conn);
+            m_conn = nullptr;
+        }
+
+        JusticeFlow::DBConfig cfg;
+        (void)cfg.loadFromEnvironment();
+        m_conn = PQconnectdb(cfg.toConnectionString().c_str());
         return PQstatus(m_conn) == CONNECTION_OK;
     }
 
