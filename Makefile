@@ -17,7 +17,7 @@ INSTALL_PREFIX  := /usr/local
 
 # Compiler settings
 CXX             := g++
-CXXFLAGS        := -std=c++17 -Wall -Wextra -fPIC -pthread
+CXXFLAGS        := -std=c++17 -Wall -Wextra -Werror -fPIC -pthread
 CXXFLAGS_DEBUG  := $(CXXFLAGS) -g -O0 -DDEBUG
 CXXFLAGS_RELEASE:= $(CXXFLAGS) -O3 -DNDEBUG
 
@@ -116,6 +116,7 @@ test: $(TEST_EXECUTABLE)
 	@export PGHOST=/var/run/postgresql && \
 	 export PGDATABASE=justiceflow && \
 	 export PGUSER=justice_app && \
+	 export JF_TEST_AUTH_FALLBACK='42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123' && \
 	 ./$(TEST_EXECUTABLE)
 
 $(TEST_EXECUTABLE): $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o, $(OBJECTS)) $(TEST_OBJECTS)
