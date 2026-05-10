@@ -55,9 +55,9 @@ CREATE TABLE Officers(
             AND retirement_date IS NULL
         )
     ),
-        password_hash VARCHAR(255),
+    password_hash VARCHAR(255),
     last_login TIMESTAMP;
-)
+) ;
 
 CREATE TABLE Cases (
     case_id BIGSERIAL PRIMARY KEY,
