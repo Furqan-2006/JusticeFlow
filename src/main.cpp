@@ -187,7 +187,7 @@ private:
 // SIGNAL HANDLERS
 // ============================================================================
 
-void handle_sigint(int sig)
+void handle_sigint(int sig __attribute__((unused)))
 {
     if (g_orchestrator)
     {
@@ -197,7 +197,7 @@ void handle_sigint(int sig)
     exit(0);
 }
 
-void handle_sigterm(int sig)
+void handle_sigterm(int sig __attribute__((unused)))
 {
     if (g_orchestrator)
     {
@@ -207,7 +207,7 @@ void handle_sigterm(int sig)
     exit(0);
 }
 
-void handle_sighup(int sig)
+void handle_sighup(int sig __attribute__((unused)))
 {
     Logger::info("Received SIGHUP (reload config not yet implemented)");
 }

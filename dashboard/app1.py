@@ -248,55 +248,111 @@ def apply_theme(fig):
     return fig
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DATA LAYER — DB → Graceful Mock Fallback
+# DATA LAYER — SQLAlchemy + Graceful Mock Fallback
 # ══════════════════════════════════════════════════════════════════════════════
 
-def try_connect():
+from sqlalchemy import create_engine, text as sa_text
+
+@st.cache_resource
+def get_engine():
     try:
-        import psycopg2
-        conn = psycopg2.connect(
-            dbname="justiceflow", user="justiceflow",
-            host="localhost", connect_timeout=3
+        engine = create_engine(
+            "postgresql+psycopg2://postgres@/justiceflow?host=/var/run/postgresql",
+            connect_args={"connect_timeout": 3},
+            pool_pre_ping=True,
         )
-        return conn
-    except Exception:
+        with engine.connect() as c:
+            c.execute(sa_text("SELECT 1"))
+        print("[DB] Engine connected successfully.")
+        return engine
+    except Exception as e:
+        print(f"[DB ERROR] Engine failed: {e}")
         return None
+
 
 @st.cache_data(ttl=60)
 def load_hotspots():
-    conn = try_connect()
-    if conn:
+    engine = get_engine()
+    if engine:
         try:
-            df = pd.read_sql("SELECT * FROM analytics.hotspots ORDER BY zone_rank LIMIT 20", conn)
-            conn.close()
-            return df, False
-        except Exception:
-            conn.close()
+            df = pd.read_sql("""
+                SELECT
+                    analyzed_at                                         AS run_at,
+                    ROW_NUMBER() OVER (ORDER BY risk_score DESC)::int   AS zone_rank,
+                    case_count                                          AS incident_count,
+                    center_lat::float                                   AS centroid_lat,
+                    center_lon::float                                   AS centroid_lon,
+                    zone_label,
+                    risk_level,
+                    risk_score::float,
+                    area_description,
+                    dominant_case_type,
+                    patrol_increase_pct,
+                    recommendation_text,
+                    algorithm,
+                    epsilon,
+                    min_samples
+                FROM analytics.crime_hotspots
+                ORDER BY risk_score DESC
+                LIMIT 20
+            """, engine)
+            if not df.empty:
+                return df, False
+            print("[DB WARNING] crime_hotspots is empty. Using mock.")
+        except Exception as e:
+            print(f"[DB ERROR] load_hotspots: {e}")
 
+    # Mock fallback
     rng = np.random.default_rng(42)
     n = 8
-    base_lat = [33.72, 33.68, 33.74, 33.65, 33.71, 33.76, 33.69, 33.63]
-    base_lon = [73.04, 73.09, 73.01, 73.06, 73.12, 73.03, 73.08, 73.15]
+    base_lat = [24.8607, 24.9418, 24.8282, 24.8925, 24.9268, 24.8615, 24.9056, 24.8742]
+    base_lon = [67.0011, 66.9750, 67.1287, 67.2088, 67.0819, 67.0104, 67.0400, 67.1289]
     df = pd.DataFrame({
         "run_at":         [datetime.now() - timedelta(hours=i*2) for i in range(n)],
         "zone_rank":      list(range(1, n+1)),
-        "incident_count": rng.integers(18, 120, n),
-        "centroid_lat":   np.array(base_lat) + rng.uniform(-0.005, 0.005, n),
-        "centroid_lon":   np.array(base_lon) + rng.uniform(-0.005, 0.005, n),
+        "incident_count": rng.integers(18, 120, n).tolist(),
+        "centroid_lat":   (np.array(base_lat) + rng.uniform(-0.005, 0.005, n)).tolist(),
+        "centroid_lon":   (np.array(base_lon) + rng.uniform(-0.005, 0.005, n)).tolist(),
     })
     return df, True
 
+
 @st.cache_data(ttl=60)
 def load_case_priority():
-    conn = try_connect()
-    if conn:
+    engine = get_engine()
+    if engine:
         try:
-            df = pd.read_sql("SELECT * FROM analytics.case_priority ORDER BY priority_proba DESC", conn)
-            conn.close()
-            return df, False
-        except Exception:
-            conn.close()
+            df = pd.read_sql("""
+                SELECT
+                    score_id,
+                    'FIR-2024-' || case_id::text  AS case_id,
+                    priority_level                AS priority_label,
+                    priority_score::float         AS priority_proba,
+                    feature_contributions,
+                    top_reason,
+                    suggested_action,
+                    analyzed_at,
+                    model_version,
+                    model_accuracy::float
+                FROM analytics.case_priority_scores
+                ORDER BY priority_score DESC
+            """, engine)
+            if not df.empty:
+                # Convert feature_contributions JSONB → SHAP string the dashboard parses
+                def build_shap_str(fc):
+                    if isinstance(fc, dict) and fc:
+                        top4 = sorted(fc.items(), key=lambda x: abs(x[1]), reverse=True)[:4]
+                        return ", ".join(
+                            f"{k}({'+' if v >= 0 else ''}{float(v):.3f})" for k, v in top4
+                        )
+                    return str(fc)
+                df["shap_top_features"] = df["feature_contributions"].apply(build_shap_str)
+                return df, False
+            print("[DB WARNING] case_priority_scores is empty. Using mock.")
+        except Exception as e:
+            print(f"[DB ERROR] load_case_priority: {e}")
 
+    # Mock fallback
     rng = np.random.default_rng(7)
     n = 20
     labels = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
@@ -318,28 +374,44 @@ def load_case_priority():
             d=round(rng.uniform(0.02, 0.15), 3),
         )
         rows.append({
-            "case_id": f"CJ-{2024_000 + i + 1}",
-            "priority_label": label,
-            "priority_proba": round(proba, 4),
+            "case_id":           f"FIR-{2024}-{random.randint(1000,9999)}",
+            "priority_label":    label,
+            "priority_proba":    round(proba, 4),
             "shap_top_features": shap_str,
         })
     df = pd.DataFrame(rows).sort_values("priority_proba", ascending=False).reset_index(drop=True)
     return df, True
 
+
 @st.cache_data(ttl=60)
 def load_workload():
-    conn = try_connect()
-    if conn:
+    engine = get_engine()
+    if engine:
         try:
-            df = pd.read_sql('SELECT * FROM analytics."Officer_Workload_Assignments"', conn)
-            conn.close()
-            return df, False
-        except Exception:
-            conn.close()
+            df = pd.read_sql("""
+                SELECT
+                    assignment_id,
+                    'FIR-2024-' || case_id::text     AS case_id,
+                    'OFF-' || officer_id::text        AS officer_id,
+                    assignment_status,
+                    cost_score::float,
+                    recommendation_reason,
+                    cost_breakdown::text              AS cost_breakdown,
+                    officer_active_cases,
+                    officer_workload_score::float
+                FROM analytics.officer_workload_assignments
+                ORDER BY analyzed_at DESC
+            """, engine)
+            if not df.empty:
+                return df, False
+            print("[DB WARNING] officer_workload_assignments is empty. Using mock.")
+        except Exception as e:
+            print(f"[DB ERROR] load_workload: {e}")
 
+    # Mock fallback
     rng = np.random.default_rng(13)
     officers = [f"OFF-{100+i}" for i in range(12)]
-    cases = [f"CJ-{2024_100 + i}" for i in range(18)]
+    cases    = [f"FIR-2024-{1000 + i}" for i in range(18)]
     reasons_pool = [
         "Skill match: Narcotics (score 0.91). Geo proximity: 2.1km.",
         "Lowest workload in district. Rank compatibility: DET-II.",
@@ -350,21 +422,20 @@ def load_workload():
     rows = []
     for i, case in enumerate(cases):
         off = officers[i % len(officers)]
-        wb = round(rng.uniform(20, 50), 1)
-        sk = round(rng.uniform(15, 40), 1)
-        rk = round(rng.uniform(10, 25), 1)
+        wb  = round(rng.uniform(20, 50), 1)
+        sk  = round(rng.uniform(15, 40), 1)
+        rk  = round(rng.uniform(10, 25), 1)
         geo = round(100 - wb - sk - rk, 1)
         rows.append({
-            "case_id": case,
-            "officer_id": off,
-            "assignment_status": rng.choice(["ASSIGNED", "PENDING", "REVIEW"], p=[0.7, 0.2, 0.1]),
-            "cost_score": round(rng.uniform(0.22, 0.95), 4),
-            "recommendation_reason": random.choice(reasons_pool),
-            "cost_breakdown": json.dumps({"workload": wb, "skill": sk, "rank": rk, "geo": max(geo, 5)}),
+            "case_id":              case,
+            "officer_id":           off,
+            "assignment_status":    rng.choice(["ASSIGNED", "PENDING", "REVIEW"], p=[0.7, 0.2, 0.1]),
+            "cost_score":           round(rng.uniform(0.22, 0.95), 4),
+            "recommendation_reason":random.choice(reasons_pool),
+            "cost_breakdown":       json.dumps({"workload": wb, "skill": sk, "rank": rk, "geo": max(geo, 5)}),
             "officer_active_cases": int(rng.integers(1, 11)),
         })
-    df = pd.DataFrame(rows)
-    return df, True
+    return pd.DataFrame(rows), True
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAVIGATION
@@ -483,7 +554,7 @@ if page == "01 · System Overview":
         OUT [label="analytics.*\n(PostgreSQL Tables)" fillcolor="#1a0a0a" color="#ff3333" fontcolor="#ff6666" shape=cylinder]
         DASH[label="JusticeFlow\nStreamlit Dashboard" fillcolor="#0a1628" color="#00d4ff" fontcolor="#00d4ff" shape=box3d]
 
-        /* ── Cross-layer edges ── */
+        /* ── Cross-layer edges ─�� */
         SHM -> SS1 [label="mmap() READ" color="#8855ff" fontcolor="#8855ff"]
         SHM -> SS2 [label="mmap() READ" color="#8855ff" fontcolor="#8855ff"]
         SHM -> SS3 [label="mmap() READ" color="#8855ff" fontcolor="#8855ff"]
@@ -726,7 +797,7 @@ labels = db.labels_<br>
         st.plotly_chart(fig_bar, use_container_width=True)
 
     # Raw data
-    with st.expander("📋 Raw Hotspot Data (analytics.hotspots)"):
+    with st.expander("📋 Raw Hotspot Data (analytics.crime_hotspots)"):
         st.dataframe(df.style.background_gradient(subset=["incident_count"], cmap="YlOrRd"),
                      use_container_width=True)
 
@@ -984,11 +1055,17 @@ elif page == "04 · Workload Balancer":
 
         # Parse cost_breakdown JSON
         try:
-            cb = json.loads(row["cost_breakdown"])
+            cb_raw = json.loads(row["cost_breakdown"]) if isinstance(row["cost_breakdown"], str) else row["cost_breakdown"]
+            # Keep only keys whose values are actually numeric
+            cb = {k: float(v) for k, v in cb_raw.items() if isinstance(v, (int, float)) or (isinstance(v, str) and v.replace('.','',1).lstrip('-').isdigit())}
         except Exception:
-            cb = {"workload": 35, "skill": 30, "rank": 20, "geo": 15}
+            cb = {}
 
-        total = sum(cb.values())
+        # Fall back to mandated weights if nothing numeric came through
+        if not cb:
+            cb = {"workload": 35.0, "skill": 30.0, "rank": 20.0, "geo": 15.0}
+
+        total = sum(cb.values()) or 1  # guard against zero division
         cb_norm = {k: round(v / total * 100, 1) for k, v in cb.items()}
 
         labels  = [k.upper() for k in cb_norm]
