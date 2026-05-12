@@ -24,7 +24,7 @@
 #include "../src/os_layer/os_layer.h"
 #include "../src/system/shr_infra/auth/include/auth_module.h"
 
-#include <<gtest/gtest.h>>
+#include <gtest/gtest.h>
 
 #include <algorithm>
 #include <atomic>
@@ -46,7 +46,7 @@
 // §1  SCHEDULER / CONTROL PLANE
 // =============================================================================
 
-class SchedulerTest : public ::testing::Test
+class SchedulerFixtureTest : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -63,7 +63,7 @@ protected:
 };
 
 // TC-OS-SCHED-01 — Singleton identity
-TEST_F(SchedulerTest, SingletonReturnsSameInstance)
+TEST_F(SchedulerFixtureTest, SingletonReturnsSameInstance)
 {
     auto *a = &Scheduler::getInstance();
     auto *b = &Scheduler::getInstance();
@@ -71,7 +71,7 @@ TEST_F(SchedulerTest, SingletonReturnsSameInstance)
 }
 
 // TC-OS-SCHED-02 — State transition STOPPED → RUNNING → STOPPED
-TEST_F(SchedulerTest, StateTransitionRoundTrip)
+TEST_F(SchedulerFixtureTest, StateTransitionRoundTrip)
 {
     Scheduler::getInstance().setState(SchedulerState::RUNNING);
     EXPECT_EQ(Scheduler::getInstance().getState(), SchedulerState::RUNNING);
@@ -81,7 +81,7 @@ TEST_F(SchedulerTest, StateTransitionRoundTrip)
 }
 
 // TC-OS-SCHED-03 — Timer::arm() returns a valid ResultCode (not UB / crash)
-TEST_F(SchedulerTest, TimerArmReturnsValidCode)
+TEST_F(SchedulerFixtureTest, TimerArmReturnsValidCode)
 {
     auto rc = Timer::arm(1);
     bool valid = (rc == JusticeFlow::ResultCode::OK ||
@@ -90,7 +90,7 @@ TEST_F(SchedulerTest, TimerArmReturnsValidCode)
 }
 
 // TC-OS-SCHED-04 — Timer::disarm() succeeds after arm
-TEST_F(SchedulerTest, TimerDisarmAfterArm)
+TEST_F(SchedulerFixtureTest, TimerDisarmAfterArm)
 {
     Timer::arm(2);
     auto rc = Timer::disarm();
@@ -100,7 +100,7 @@ TEST_F(SchedulerTest, TimerDisarmAfterArm)
 }
 
 // TC-OS-SCHED-05 — Repeated arm/disarm cycles must not crash or leak
-TEST_F(SchedulerTest, TimerArmDisarmCycleRepeated)
+TEST_F(SchedulerFixtureTest, TimerArmDisarmCycleRepeated)
 {
     for (int i = 0; i < 10; ++i)
     {
@@ -112,7 +112,7 @@ TEST_F(SchedulerTest, TimerArmDisarmCycleRepeated)
 }
 
 // TC-OS-SCHED-06 — Double arm does not crash or assert
-TEST_F(SchedulerTest, TimerDoubleArmIsSafe)
+TEST_F(SchedulerFixtureTest, TimerDoubleArmIsSafe)
 {
     Timer::arm(1);
     auto rc = Timer::arm(1); // second call while already armed
@@ -124,7 +124,7 @@ TEST_F(SchedulerTest, TimerDoubleArmIsSafe)
 
 // TC-OS-SCHED-07 [TP: TC-OS-08] — SIGALRM fires within a reasonable window
 // (1-second timer; we poll for the signal for up to 3 seconds)
-TEST_F(SchedulerTest, SigAlrmFiresWithinExpectedWindow)
+TEST_F(SchedulerFixtureTest, SigAlrmFiresWithinExpectedWindow)
 {
     SignalHandler::init();
     Scheduler::getInstance().setState(SchedulerState::RUNNING);
@@ -154,7 +154,7 @@ TEST_F(SchedulerTest, SigAlrmFiresWithinExpectedWindow)
 }
 
 // TC-OS-SCHED-08 [TP: TC-OS-09] — SIGTERM triggers drain and scheduler stops
-TEST_F(SchedulerTest, SigTermDrainsSchedulerToStopped)
+TEST_F(SchedulerFixtureTest, SigTermDrainsSchedulerToStopped)
 {
     SignalHandler::init();
     Scheduler::getInstance().setState(SchedulerState::RUNNING);
@@ -477,8 +477,9 @@ TEST_F(ThreadingTest, ThreadPoolSingleton)
 TEST_F(ThreadingTest, MutexBasicLockUnlock)
 {
     Mutex m;
-    m.lock();
-    m.unlock();
+    {
+        MutexGuard g(m);
+    }
     SUCCEED();
 }
 
@@ -673,21 +674,26 @@ TEST_F(ThreadingTest, SharedCounterNoRaceUnderTwentyThreads)
     EXPECT_EQ(counter, static_cast<long>(THREAD_COUNT * INCREMENTS_PER_THREAD));
 }
 
-// TC-OS-THR-10 — Semaphore initialised to 0 blocks immediately until posted
-TEST_F(ThreadingTest, SemaphoreZeroInitialValueBlocksUntilPost)
+// TC-OS-THR-10 — A drained semaphore (value 0) blocks until a held guard is released
+TEST_F(ThreadingTest, SemaphoreZeroBlocksUntilGuardReleased)
 {
-    Semaphore sem(0);
+    Semaphore sem(1);
     std::atomic<bool> proceeded{false};
+
+    // Drain semaphore to 0 by holding a guard on the heap so we
+    // control exactly when sem_post fires (on delete).
+    SemGuard *holder = new SemGuard(sem); // value: 1 → 0
 
     std::thread waiter([&]()
                        {
-        SemGuard g(sem); // must block
+        SemGuard g(sem); // blocks — value is 0
         proceeded.store(true); });
 
     std::this_thread::sleep_for(std::chrono::milliseconds(60));
-    EXPECT_FALSE(proceeded.load()) << "Thread should still be blocking";
+    EXPECT_FALSE(proceeded.load()) << "Waiter should still be blocking";
 
-    sem.post(); // unblock
+    delete holder; // ~SemGuard calls sem_post: value 0 → 1, unblocks waiter
+
     waiter.join();
     EXPECT_TRUE(proceeded.load());
 }
