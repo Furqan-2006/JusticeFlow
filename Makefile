@@ -285,3 +285,221 @@ full-setup: verify-deps setup-all build
 # Print variables for debugging Makefile logic
 print-%:
 	@echo $* = $($*)
+
+# ============================================================================
+# Individual Test Targets
+# ============================================================================
+# Usage:
+#   make os_layer_test          — OS layer (scheduler, IPC, threading, memory,
+#                                  process, token generator)
+#   make auth_test              — Authentication unit tests
+#   make case_test              — Case facade tests
+#   make cli_test               — CLI interface tests
+#   make db_test                — Database / IPC layer tests
+#   make enforcement_test       — Enforcement facade tests
+#   make forensic_test          — Forensic facade tests
+#   make ipc_test               — Shared-memory IPC tests
+#   make orchestrator_test      — System orchestrator / init tests
+#   make orchestrator_stress_test — Singleton thread-safety + reinit cycle
+#   make system_integration_test — End-to-end integration tests
+#   make list-tests             — Print every available test target
+# ============================================================================
+
+# App objects without main (reused by every test binary)
+APP_OBJECTS      := $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o, $(OBJECTS))
+
+# test_common.o — compiled once, linked into every fixture-based test
+TEST_COMMON_OBJ  := $(BUILD_DIR)/$(TEST_DIR)/test_common.o
+
+# Environment variables injected for every individual test run
+TEST_ENV := \
+    PGHOST=/var/run/postgresql \
+    PGDATABASE=justiceflow_test \
+    PGUSER=justice_app \
+    JF_TEST_AUTH_FALLBACK='42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123'
+
+# Directory where per-module test binaries are placed
+TEST_BIN_DIR := $(BUILD_DIR)/tests/bin
+
+.PHONY: os_layer_test auth_test case_test cli_test db_test \
+        enforcement_test forensic_test ipc_test \
+        orchestrator_test orchestrator_stress_test \
+        system_integration_test list-tests
+
+# ─── Shared build rule for all per-module test objects ───────────────────────
+# (same flags / includes as the main test build)
+$(BUILD_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.cpp
+	@echo "[CXX]  $<"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -I$(TEST_DIR) -c $< -o $@
+
+# ─── OS Layer ────────────────────────────────────────────────────────────────
+# Covers: comprehensive OS test, smoke test, os_layer fixture test,
+#         scheduler, supervisor, IPC (shared memory), and DB connectivity.
+OS_LAYER_TEST_BIN  := $(TEST_BIN_DIR)/os_layer_test
+OS_LAYER_TEST_OBJS := \
+    $(BUILD_DIR)/$(TEST_DIR)/os_layer_comprehensive_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/os_layer_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/os_smoke_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/scheduler_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/superviser_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/ipc_test.o \
+    $(BUILD_DIR)/$(TEST_DIR)/db_test.o
+
+os_layer_test: $(OS_LAYER_TEST_BIN)
+	@echo "[RUN]  OS Layer Tests"
+	@$(TEST_ENV) ./$(OS_LAYER_TEST_BIN) --gtest_color=yes
+
+$(OS_LAYER_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(OS_LAYER_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Authentication ───────────────────────────────────────────────────────────
+AUTH_TEST_BIN  := $(TEST_BIN_DIR)/auth_test
+AUTH_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/auth_unit_test.o
+
+auth_test: $(AUTH_TEST_BIN)
+	@echo "[RUN]  Auth Unit Tests"
+	@$(TEST_ENV) ./$(AUTH_TEST_BIN) --gtest_color=yes
+
+$(AUTH_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(AUTH_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Case Facade ─────────────────────────────────────────────────────────────
+CASE_TEST_BIN  := $(TEST_BIN_DIR)/case_test
+CASE_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/case_facade_test.o
+
+case_test: $(CASE_TEST_BIN)
+	@echo "[RUN]  Case Facade Tests"
+	@$(TEST_ENV) ./$(CASE_TEST_BIN) --gtest_color=yes
+
+$(CASE_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(CASE_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── CLI Interface ────────────────────────────────────────────────────────────
+CLI_TEST_BIN  := $(TEST_BIN_DIR)/cli_test
+CLI_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/cli_test.o
+
+cli_test: $(CLI_TEST_BIN)
+	@echo "[RUN]  CLI Tests"
+	@$(TEST_ENV) ./$(CLI_TEST_BIN) --gtest_color=yes
+
+$(CLI_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(CLI_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Database / IPC ───────────────────────────────────────────────────────────
+DB_TEST_BIN  := $(TEST_BIN_DIR)/db_test
+DB_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/db_test.o
+
+db_test: $(DB_TEST_BIN)
+	@echo "[RUN]  DB / IPC Tests"
+	@$(TEST_ENV) ./$(DB_TEST_BIN) --gtest_color=yes
+
+$(DB_TEST_BIN): $(APP_OBJECTS) $(DB_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Enforcement Facade ───────────────────────────────────────────────────────
+ENFORCEMENT_TEST_BIN  := $(TEST_BIN_DIR)/enforcement_test
+ENFORCEMENT_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/enforcement_test.o
+
+enforcement_test: $(ENFORCEMENT_TEST_BIN)
+	@echo "[RUN]  Enforcement Tests"
+	@$(TEST_ENV) ./$(ENFORCEMENT_TEST_BIN) --gtest_color=yes
+
+$(ENFORCEMENT_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(ENFORCEMENT_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Forensic Facade ──────────────────────────────────────────────────────────
+FORENSIC_TEST_BIN  := $(TEST_BIN_DIR)/forensic_test
+FORENSIC_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/forensic_test.o
+
+forensic_test: $(FORENSIC_TEST_BIN)
+	@echo "[RUN]  Forensic Tests"
+	@$(TEST_ENV) ./$(FORENSIC_TEST_BIN) --gtest_color=yes
+
+$(FORENSIC_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(FORENSIC_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── IPC / Shared Memory ─────────────────────────────────────────────────────
+IPC_TEST_BIN  := $(TEST_BIN_DIR)/ipc_test
+IPC_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/ipc_test.o
+
+ipc_test: $(IPC_TEST_BIN)
+	@echo "[RUN]  IPC / Shared Memory Tests"
+	@$(TEST_ENV) ./$(IPC_TEST_BIN) --gtest_color=yes
+
+$(IPC_TEST_BIN): $(APP_OBJECTS) $(IPC_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Orchestrator ─────────────────────────────────────────────────────────────
+ORCHESTRATOR_TEST_BIN  := $(TEST_BIN_DIR)/orchestrator_test
+ORCHESTRATOR_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/orchestrator_test.o
+
+orchestrator_test: $(ORCHESTRATOR_TEST_BIN)
+	@echo "[RUN]  Orchestrator Tests"
+	@$(TEST_ENV) ./$(ORCHESTRATOR_TEST_BIN) --gtest_color=yes
+
+$(ORCHESTRATOR_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(ORCHESTRATOR_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── Orchestrator Stress ──────────────────────────────────────────────────────
+ORCHESTRATOR_STRESS_TEST_BIN  := $(TEST_BIN_DIR)/orchestrator_stress_test
+ORCHESTRATOR_STRESS_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/orchestrator_stress_test.o
+
+orchestrator_stress_test: $(ORCHESTRATOR_STRESS_TEST_BIN)
+	@echo "[RUN]  Orchestrator Stress Tests"
+	@$(TEST_ENV) ./$(ORCHESTRATOR_STRESS_TEST_BIN) --gtest_color=yes
+
+$(ORCHESTRATOR_STRESS_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(ORCHESTRATOR_STRESS_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── System Integration ───────────────────────────────────────────────────────
+SYSTEM_INTEGRATION_TEST_BIN  := $(TEST_BIN_DIR)/system_integration_test
+SYSTEM_INTEGRATION_TEST_OBJS := $(BUILD_DIR)/$(TEST_DIR)/system_integration_test.o
+
+system_integration_test: $(SYSTEM_INTEGRATION_TEST_BIN)
+	@echo "[RUN]  System Integration Tests"
+	@$(TEST_ENV) ./$(SYSTEM_INTEGRATION_TEST_BIN) --gtest_color=yes
+
+$(SYSTEM_INTEGRATION_TEST_BIN): $(APP_OBJECTS) $(TEST_COMMON_OBJ) $(SYSTEM_INTEGRATION_TEST_OBJS)
+	@echo "[LINK] $@"
+	@mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(LDLIBS) -lgtest -lgtest_main
+
+# ─── List all available test targets ─────────────────────────────────────────
+list-tests:
+	@echo ""
+	@echo "Available individual test targets:"
+	@echo "  make os_layer_test           OS layer (scheduler, IPC, threading, memory, process)"
+	@echo "  make auth_test               Authentication unit tests"
+	@echo "  make case_test               Case facade tests"
+	@echo "  make cli_test                CLI interface tests"
+	@echo "  make db_test                 Database / IPC layer tests"
+	@echo "  make enforcement_test        Enforcement facade tests"
+	@echo "  make forensic_test           Forensic facade tests"
+	@echo "  make ipc_test                Shared-memory IPC tests"
+	@echo "  make orchestrator_test       System orchestrator / init tests"
+	@echo "  make orchestrator_stress_test  Singleton thread-safety + reinit cycle"
+	@echo "  make system_integration_test End-to-end integration tests"
+	@echo ""
+	@echo "Run all tests at once:  make test"
+	@echo ""
