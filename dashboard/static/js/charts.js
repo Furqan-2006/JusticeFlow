@@ -3,8 +3,8 @@ function loadOSMetrics() {
         .then(res => res.json())
         .then(data => {
             // Error or backend unavailable
-            if (data.status === "error") {
-                document.getElementById("metrics-status").innerText = data.message || "Unknown error.";
+            if (!data || data.status === "error") {
+                document.getElementById("metrics-status").innerText = (data && data.message) ? data.message : "Failed to load data.";
                 return;
             } else {
                 document.getElementById("metrics-status").innerText = "";
