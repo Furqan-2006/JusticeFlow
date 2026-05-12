@@ -2,9 +2,17 @@
 <html>
 <head>
     <title>JusticeFlow Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
-    <h1>JusticeFlow Command Center</h1>
-    <p>Backend Status: {{ stats }}</p>
+    <h1>JusticeFlow Dashboard</h1>
+    <nav>
+        <a href="{{ url_for('dashboard') }}">Home</a> |
+        <a href="{{ url_for('os_metrics_page') }}">OS Metrics</a>
+    </nav>
+    <div class="main-content">
+        <h2>Welcome!</h2>
+        <p>Use the navigation bar to view system OS metrics and analytics.</p>
+    </div>
 </body>
 </html>
