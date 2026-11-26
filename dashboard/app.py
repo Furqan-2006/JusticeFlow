@@ -25,6 +25,8 @@ CASE_TYPES = [
     "EXTORTION", "GANG_ACTIVITY", "THEFT", "FRAUD", "CYBERCRIME", "HIT_AND_RUN", "VEHICLE_THEFT",
     "DOMESTIC_VIOLENCE", "HARASSMENT", "BRIBERY", "FORGERY", "PUBLIC_DISTURBANCE",
 ]
+WARRANT_TYPES = ["ARREST", "SEARCH", "SEIZURE"]
+SENIOR_RANKS = {"INSPECTOR", "DSP", "SP", "SSP", "DIG", "ADDL_IG", "IGP"}
 EVIDENCE_TYPES = ["PHYSICAL", "DIGITAL", "TESTIMONIAL", "FORENSIC", "DOCUMENTARY"]
 
 
@@ -197,8 +199,22 @@ def create_app():
             abort(404)  # gateway answered: no such case
         errors = [] if result["ok"] else [result["message"]]
         evidence = fetch("GET_CASE_EVIDENCE", {"case_id": case_id}, errors, "evidence", []) if result["ok"] else []
+        warrants = fetch("GET_CASE_WARRANTS", {"case_id": case_id}, errors, "warrants", []) if result["ok"] else []
+        can_warrant = (session.get("officer") or {}).get("rank") in SENIOR_RANKS
         return render_template("case_detail.html", errors=errors, case=result["data"],
-                               evidence=evidence, evidence_types=EVIDENCE_TYPES)
+                               evidence=evidence, evidence_types=EVIDENCE_TYPES, warrants=warrants,
+                               warrant_types=WARRANT_TYPES, can_warrant=can_warrant)
+
+    @app.route("/cases/<int:case_id>/warrants", methods=["POST"])
+    def issue_warrant(case_id):
+        result = call("ISSUE_WARRANT", {"case_id": case_id, **{k: request.form.get(k, "").strip() for k in (
+            "warrant_type", "accused_cnic", "issuing_court", "magistrate_name", "valid_until",
+            "target_address")}})
+        if result["ok"]:
+            flash(f"Warrant {result['data']['warrant_number']} issued, valid until {result['data']['valid_until']}.")
+        else:
+            flash(f"Warrant not issued: {result['message']}")
+        return redirect(url_for("case_detail", case_id=case_id))
 
     @app.route("/cases/<int:case_id>/evidence", methods=["POST"])
     def add_evidence(case_id):

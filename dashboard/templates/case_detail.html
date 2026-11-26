@@ -37,6 +37,34 @@
         <button type="submit">Record evidence</button>
     </form>
 </section>
+<section class="card">
+    <h2>Warrants</h2>
+    {% if warrants %}
+    <table>
+        <thead><tr><th>Number</th><th>Type</th><th>Status</th><th>Court</th><th>Issued</th><th>Valid until</th></tr></thead>
+        <tbody>
+        {% for w in warrants %}
+        <tr><td>{{ w.warrant_number }}</td><td>{{ w.warrant_type | pretty }}</td>
+            <td><span class="pill st-{{ w.status | slug }}">{{ w.status | pretty }}</span></td>
+            <td>{{ w.issuing_court }}<br><small>{{ w.magistrate_name }}</small></td>
+            <td>{{ w.issue_date }}</td><td>{{ w.valid_until }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="empty">No warrants on this case.</p>{% endif %}
+    {% if can_warrant %}
+    <form method="post" action="{{ url_for('issue_warrant', case_id=case.case_id) }}" class="stack">
+        <h3>Issue warrant</h3>
+        <label>Type <select name="warrant_type">{% for t in warrant_types %}<option value="{{ t }}">{{ t | pretty }}</option>{% endfor %}</select></label>
+        <label>Accused CNIC (optional) <input name="accused_cnic" placeholder="42101-1234567-1"></label>
+        <label>Issuing court <input name="issuing_court" maxlength="150" required></label>
+        <label>Magistrate <input name="magistrate_name" maxlength="100" required></label>
+        <label>Target address (required for search and seizure) <input name="target_address"></label>
+        <label>Valid until (blank = 30 days) <input name="valid_until" type="date"></label>
+        <button type="submit">Issue warrant</button>
+    </form>
+    {% else %}<p class="empty">Issuing a warrant needs Inspector rank or above.</p>{% endif %}
+</section>
 {% else %}
 <h1>Case unavailable</h1>
 {% endif %}
