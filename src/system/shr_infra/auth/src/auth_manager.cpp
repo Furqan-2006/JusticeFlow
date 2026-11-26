@@ -17,7 +17,6 @@ namespace auth
     static std::unique_ptr<ipc::UnixSocket> createAuthConnection();
     static bool parseOfficerRank(const std::string &rank, JusticeFlow::OfficerRank &out_rank);
     static bool isRejectedCredentialInput(const std::string &cnic, const std::string &password);
-    static bool authenticateFallbackUser(const std::string &cnic, const std::string &password, JusticeFlow::SessionContext &out_session);
 
     // ============================================================================
     // Implementation
@@ -97,10 +96,6 @@ namespace auth
 
         if (db_result != JusticeFlow::ResultCode::OK)
         {
-            if (authenticateFallbackUser(cnic, password, out_session))
-            {
-                return session_store->insert(out_session);
-            }
             Logger::error("[AuthManager] Login query failed");
             return JusticeFlow::ResultCode::AUTH_FAILED;
         }
@@ -296,49 +291,6 @@ namespace auth
                 return true;
         }
         return false;
-    }
-
-    static bool authenticateFallbackUser(const std::string &cnic, const std::string &password, JusticeFlow::SessionContext &out_session)
-    {
-        const char *raw = std::getenv("JF_TEST_AUTH_FALLBACK");
-        if (raw == nullptr || raw[0] == '\0')
-        {
-            return false;
-        }
-
-        bool matched = false;
-        std::stringstream ss(raw);
-        std::string pair;
-        while (std::getline(ss, pair, ';'))
-        {
-            const std::size_t pos = pair.find('=');
-            if (pos == std::string::npos)
-                continue;
-            if (pair.substr(0, pos) == cnic && pair.substr(pos + 1) == password)
-            {
-                matched = true;
-                break;
-            }
-        }
-        if (!matched)
-            return false;
-
-        std::string token = token_generator::generate();
-        if (token.empty())
-        {
-            return false;
-        }
-
-        long now = time(nullptr);
-        out_session.officerId = 1;
-        out_session.cnic = cnic;
-        out_session.rank = JusticeFlow::OfficerRank::SI;
-        out_session.stationId = 1;
-        out_session.createdAt = now;
-        out_session.expiresAt = now + (8 * 3600);
-        out_session.isValid = true;
-        out_session.sessionToken = token;
-        return true;
     }
 
 } // namespace auth

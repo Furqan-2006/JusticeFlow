@@ -32,7 +32,7 @@ def _read_exactly(sock, count):
     return buf
 
 
-def call(command, params=None):
+def call(command, params=None, token=None):
     """Send one command and return {"ok", "status", "message", "data"}.
 
     Never raises: an unreachable gateway or a malformed reply comes back as
@@ -42,7 +42,7 @@ def call(command, params=None):
         {
             "request_id": next(_request_ids),
             "command": command,
-            "params": {k: str(v) for k, v in (params or {}).items()},
+            "params": {k: str(v) for k, v in {**(params or {}), **({"token": token} if token else {})}.items()},
         }
     ).encode("utf-8")
 

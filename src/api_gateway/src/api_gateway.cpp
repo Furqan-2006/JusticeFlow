@@ -1,4 +1,5 @@
 #include "../include/api_gateway.h"
+#include "../include/command_router.h"
 
 #include "common/logger.h"
 
@@ -11,8 +12,15 @@ namespace api_gateway
 {
     struct ApiGateway::Impl
     {
-        explicit Impl(const std::string &path) : server(path) {}
+        explicit Impl(const std::string &path) : server(path)
+        {
+            // Authentication, login throttling and token checks live in the router.
+            server.setExtensionHandler(
+                [this](const ipc::SocketRequest &req, ipc::SocketResponse &out)
+                { return router.handle(req, out); });
+        }
         ipc::DomainSocket server;
+        CommandRouter router;
     };
 
     ApiGateway::ApiGateway(ApiGatewayConfig cfg)

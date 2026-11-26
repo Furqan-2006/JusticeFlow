@@ -66,3 +66,9 @@ tbody tr:nth-child(even) { background: #f8fafc; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .agent h2 { margin-bottom: .5rem; }
+
+.whoami { margin-left: auto; display: flex; gap: .75rem; align-items: center; font-size: .9rem; }
+.whoami button { cursor: pointer; }
+.card.login { max-width: 22rem; margin: 3rem auto; }
+.card.login label { display: block; margin: .75rem 0; }
+.card.login input { display: block; width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }

@@ -41,6 +41,7 @@
 
 #include <atomic>
 #include <pthread.h>
+#include <functional>
 #include <string>
 
 #include "../../../common/constants.h"
@@ -99,7 +100,20 @@ namespace ipc
          */
         bool isRunning() const;
 
+        /**
+         * Handler consulted before the built-in read-only dispatch.
+         * Return true after filling `out` to answer the request yourself
+         * (serve an extra command, or reject an unauthenticated one);
+         * return false to fall through to the built-in handlers.
+         * Must be set before start(); the handler runs on client threads, so
+         * it has to be thread-safe.
+         */
+        using ExtensionHandler = std::function<bool(const SocketRequest &, SocketResponse &)>;
+        void setExtensionHandler(ExtensionHandler handler);
+
     private:
+        ExtensionHandler extension_;
+
         // ── Internal helpers ────────────────────────────────────────────────────
 
         /**

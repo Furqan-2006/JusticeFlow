@@ -348,6 +348,8 @@ python3 run.py
 
 The dashboard will be available at `http://localhost:5000`.
 
+Sign in with an officer's CNIC and password (the seeded officers all use `justice123`; run `make db-reset` to reseed). The daemon verifies the credentials, issues a session token, and checks it on every data request. Set `JF_DASHBOARD_SECRET` to keep dashboard logins across restarts. After five wrong passwords a CNIC is locked for five minutes.
+
 ---
 
 ## 🎓 Course Integration Details
