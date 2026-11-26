@@ -1,18 +1,19 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>OS Metrics - JusticeFlow</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-    <h1>OS Layer Metrics</h1>
-    <nav>
-        <a href="{{ url_for('dashboard') }}">Home</a> |
-        <a href="{{ url_for('os_metrics_page') }}">OS Metrics</a>
-    </nav>
-    <div id="metrics-status" class="status"></div>
-    <canvas id="osMetricsChart" width="600" height="300"></canvas>
-    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}OS Layer — JusticeFlow{% endblock %}
+{% block content %}
+<h1>OS layer</h1>
+<p class="lede">Live view of the daemon. Refreshes every 5 seconds.</p>
+<div id="metrics-status" class="banner error" hidden></div>
+<section class="tiles">
+    <div class="tile"><span class="tile-label">Daemon uptime</span><span class="tile-value" id="uptime">—</span></div>
+    <div class="tile"><span class="tile-label">Active sessions</span><span class="tile-value" id="sessions">—</span></div>
+</section>
+<section class="card">
+    <h2>Agent slots</h2>
+    <table>
+        <thead><tr><th>Agent</th><th>State</th><th>Last update</th><th>Detail</th></tr></thead>
+        <tbody id="agent-rows"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+    </table>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/live_updates.js') }}"></script>{% endblock %}

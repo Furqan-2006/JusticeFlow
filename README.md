@@ -69,42 +69,16 @@ JusticeFlow is a full-stack, multi-disciplinary system for managing police cases
 ```
 justiceflow/
 │
-├── dashboard/                      # Python Flask web interface
-│   ├── app.py                      # Flask routes + views
-│   ├── db.py                       # psycopg2 connection (direct DB queries)
-│   ├── run.py                      # Application entry point
-│   │
-│   ├── client/                     # Unix socket client to C++ backend
-│   │   ├── __init__.py
-│   │   ├── socket_client.py        # Connects to /tmp/justiceflow.sock
-│   │   ├── request_builder.py      # Builds JSON commands
-│   │   └── response_parser.py      # Parses C++ responses
-│   │
-│   ├── services/                   # Business logic layer
-│   │   ├── __init__.py
-│   │   ├── auth_service.py         # Login, logout (calls C++ via socket)
-│   │   ├── case_service.py         # Create/view cases
-│   │   ├── duty_service.py         # Assign duties
-│   │   └── officer_service.py      # Officer management
-│   │
-│   ├── templates/
-│   │   ├── login.html
-│   │   ├── dashboard.html
-│   │   ├── cases.html
-│   │   ├── duties.html
-│   │   ├── analytics.html
-│   │   ├── ai_status.html
-│   │   └── os_metrics.html
-│   │
-│   ├── static/
-│   │   ├── js/
-│   │   │   ├── charts.js
-│   │   │   ├── live_updates.js
-│   │   │   └── socket_client.js    # WebSocket/polling for real-time updates
-│   │   └── css/styles.css
-│   │
-│   ├── requirements.txt
-│   └── README.md                   # Socket protocol documentation
+├── dashboard/                      # Python Flask web interface (read-only today)
+│   ├── app.py                      # Flask routes; every datum comes from the gateway
+│   ├── run.py                      # Entry point (127.0.0.1:5000; JF_DASHBOARD_HOST/PORT)
+│   ├── client/
+│   │   └── gateway.py              # Unix-socket client for /tmp/justiceflow.sock
+│   ├── templates/                  # base, dashboard, cases, case_detail, analytics,
+│   │                               # workload, ai_status, os_metrics
+│   ├── static/                     # css/styles.css, js/live_updates.js (5 s polling)
+│   ├── legacy/                     # old Streamlit prototype (direct DB, mock data); unused
+│   └── requirements.txt            # Flask only. The dashboard never opens a DB connection
 │
 ├── db/                             # PostgreSQL database layer
 │   ├── 00_schema.sql               # Schema namespaces: public, audit, analytics
@@ -362,11 +336,13 @@ pip install -r requirements.txt
 ### 6. Start the System
 
 ```bash
-# Start the C++ backend daemon first
-./build/justiceflow_daemon
+# Start the C++ backend daemon first (headless: serves the gateway until SIGTERM/SIGINT)
+export JF_DB_HOST=127.0.0.1 JF_DB_USER=justice_app JF_DB_PASS=<justice_app password>
+./build/justiceflow --headless --pid-file /tmp/justiceflow.pid
 
 # Then start the Flask dashboard
 cd dashboard
+pip install -r requirements.txt
 python3 run.py
 ```
 
