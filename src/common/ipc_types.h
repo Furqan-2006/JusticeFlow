@@ -9,7 +9,7 @@ extern "C"
 {
 #endif
 
-#define SHM_NAME "/agent_status_shm"
+#define SHM_NAME "/justiceflow_shm"
 #define FIFO_PATH_HOTSPOT "/tmp/agent_fifo_hotspot"
 #define FIFO_PATH_PRIORITY "/tmp/agent_fifo_priority"
 #define FIFO_PATH_WORKLOAD "/tmp/agent_fifo_workload"

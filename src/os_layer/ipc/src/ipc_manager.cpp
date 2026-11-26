@@ -117,6 +117,17 @@ namespace ipc
         return shm_handler.getTable();
     }
 
+    JusticeFlow::ResultCode IpcManager::initSharedMemory()
+    {
+        Logger::info("[IPC] Creating shared status table...");
+        return shm_handler.create();
+    }
+
+    void IpcManager::destroySharedMemory()
+    {
+        shm_handler.destroy();
+    }
+
     JusticeFlow::ResultCode IpcManager::lockDb()
     {
         return db_socket.lock();

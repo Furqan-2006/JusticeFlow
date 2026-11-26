@@ -140,6 +140,21 @@ namespace ipc
          */
         SharedStatusTable *getStatusTable();
 
+        /**
+         * Creates (or re-creates) the shared status table. Called once by the
+         * daemon at startup, after connectDatabase() and before the API gateway
+         * starts. Other processes attach to the same segment by name.
+         *
+         * @return ResultCode::OK on success, FILE_SYSTEM_ERROR otherwise
+         */
+        JusticeFlow::ResultCode initSharedMemory();
+
+        /**
+         * Unmaps nothing; removes the named segment so no stale state survives
+         * a clean shutdown. Safe to call when initSharedMemory() never ran.
+         */
+        void destroySharedMemory();
+
         JusticeFlow::ResultCode lockDb();
         JusticeFlow::ResultCode unlockDb();
     };
