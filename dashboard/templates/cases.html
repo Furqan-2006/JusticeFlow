@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Cases — JusticeFlow{% endblock %}
 {% block content %}
-<h1>Cases</h1>
+<h1>Cases <a class="button" href="{{ url_for('new_case') }}">Register FIR</a></h1>
 <section class="card">
     {% if cases %}
     <table>

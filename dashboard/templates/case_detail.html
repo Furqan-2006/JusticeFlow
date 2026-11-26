@@ -13,6 +13,30 @@
         <dt>Lead officer</dt><dd>{% if case.lead_officer_id %}#{{ case.lead_officer_id }}{% else %}not assigned{% endif %}</dd>
     </dl>
 </section>
+<section class="card">
+    <h2>Evidence</h2>
+    {% if evidence %}
+    <table>
+        <thead><tr><th>Number</th><th>Type</th><th>Description</th><th>Qty</th><th>Collected by</th><th>When</th></tr></thead>
+        <tbody>
+        {% for e in evidence %}
+        <tr><td>{{ e.evidence_number }}</td><td>{{ e.evidence_type | pretty }}</td>
+            <td>{{ e.description }}{% if e.file_path %}<br><small>{{ e.file_path }}</small>{% endif %}</td>
+            <td>{{ e.quantity }}</td><td>{{ e.collected_by }}</td><td>{{ e.collected_at | ts }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="empty">No evidence recorded.</p>{% endif %}
+    <form method="post" action="{{ url_for('add_evidence', case_id=case.case_id) }}" class="stack">
+        <h3>Add evidence</h3>
+        <label>Type <select name="evidence_type">{% for t in evidence_types %}<option value="{{ t }}">{{ t | pretty }}</option>{% endfor %}</select></label>
+        <label>Description <textarea name="description" required maxlength="2000"></textarea></label>
+        <label>Quantity <input name="quantity" type="number" min="1" value="1"></label>
+        <label>File path (digital / documentary) <input name="file_path" maxlength="255"></label>
+        <label>Collection location <input name="collection_location"></label>
+        <button type="submit">Record evidence</button>
+    </form>
+</section>
 {% else %}
 <h1>Case unavailable</h1>
 {% endif %}

@@ -30,6 +30,7 @@
             {% for e in errors %}<div>{{ e }}</div>{% endfor %}
         </div>
         {% endif %}
+        {% for m in get_flashed_messages() if request.endpoint != 'login' %}<div class="banner">{{ m }}</div>{% endfor %}
         {% block content %}{% endblock %}
     </main>
     <footer>All data served by the JusticeFlow daemon through its API gateway</footer>
