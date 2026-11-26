@@ -4,22 +4,23 @@
 
 void ExpireWarrantsJob::execute()
 {
-    Logger::info("Executing ExpireWarrantsJob...");
-    
-    // CRITICAL FIX #14.1: Now passes TWO arguments (query + results vector)
+    // Warrants carry a valid_until date; once it has passed, an ISSUED warrant
+    // is EXPIRED. Executed and cancelled warrants are left as they are.
     std::vector<std::vector<std::string>> results;
     JusticeFlow::ResultCode res = ipc::IpcManager::getInstance().executeQuery(
-        "UPDATE warrants SET status='EXPIRED' WHERE expiry_date < NOW()", 
-        results
-    );
-    
+        "UPDATE warrants SET warrant_status = 'EXPIRED', updated_at = NOW() "
+        "WHERE warrant_status = 'ISSUED' AND valid_until < CURRENT_DATE "
+        "RETURNING warrant_number",
+        results);
+
     if (res != JusticeFlow::ResultCode::OK)
     {
-        Logger::error("ExpireWarrantsJob failed!");
+        Logger::error("ExpireWarrantsJob failed");
+        return;
     }
-    else
+    if (!results.empty())
     {
-        Logger::info("ExpireWarrantsJob completed successfully");
+        Logger::info(("ExpireWarrantsJob expired " + std::to_string(results.size()) + " warrant(s)").c_str());
     }
 }
 

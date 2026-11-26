@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import json
 import psycopg2
 import numpy as np
@@ -62,7 +63,7 @@ def run_hotspots():
     print("[AI: Hotspot] Running DBSCAN hotspot detection (Top 5 zones)...")
     conn = get_db_connection()
     if not conn:
-        return
+        return False
 
     cur = None
     try:
@@ -246,6 +247,7 @@ def run_hotspots():
     except Exception as e:
         print(f"[AI: Hotspot] Execution Error: {e}")
         conn.rollback()
+        return False
     finally:
         try:
             if cur:
@@ -254,4 +256,5 @@ def run_hotspots():
             conn.close()
 
 if __name__ == "__main__":
-    run_hotspots()
+    # Exit non-zero on a real failure so the daemon can report it.
+    sys.exit(1 if run_hotspots() is False else 0)

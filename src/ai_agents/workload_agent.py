@@ -157,17 +157,10 @@ def _build_fifo_msg(
 
 
 def _write_fifo(msg: bytes) -> None:
-    """Non-blocking write to the named FIFO. Failure is non-fatal."""
-    try:
-        if not os.path.exists(FIFO_PATH):
-            return
-        fd = os.open(FIFO_PATH, os.O_WRONLY | os.O_NONBLOCK)
-        try:
-            os.write(fd, msg)
-        finally:
-            os.close(fd)
-    except OSError:
-        pass
+    """Retired. The daemon records this agent's status from its exit code, so
+    nothing is written to a FIFO any more (the old layout did not match the
+    daemon's AgentStatusMessage)."""
+    return
 
 
 # ============================================================================
@@ -184,33 +177,10 @@ def _update_shared_memory(
     is_running: bool,
     last_error_code: int,
 ) -> None:
-    try:
-        libc_name = ctypes.util.find_library("c")
-        libc = ctypes.CDLL(libc_name, use_errno=True)
-
-        fd = libc.shm_open(SHM_NAME.encode(), os.O_RDWR, 0)
-        if fd < 0:
-            return
-
-        now = int(time.time())
-        slot_data = struct.pack(
-            _SLOT_FORMAT,
-            now,
-            now + SUGGESTION_TTL_SECONDS,
-            predictions,
-            float(model_accuracy),
-            1 if is_running else 0,
-            last_error_code,
-        )
-
-        total_size = _SLOT_SIZE * 3
-        with mmap.mmap(fd, total_size, access=mmap.ACCESS_WRITE) as mm:
-            mm.seek(_SHM_OFFSET)
-            mm.write(slot_data)
-
-        os.close(fd)
-    except Exception:
-        pass  # IPC optional
+    """Retired. The old version wrote its own struct at the start of the shared
+    segment, which is where the daemon keeps its process-shared mutex, so it
+    could corrupt the status table. The daemon is now the only writer."""
+    return
 
 
 # ============================================================================
