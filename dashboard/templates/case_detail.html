@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Case {{ case.fir_number if case else '' }} — JusticeFlow{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('cases') }}">&larr; Cases</a></p>
+{% if case %}
+<h1>{{ case.fir_number }}</h1>
+<section class="card">
+    <dl class="facts">
+        <dt>Type</dt><dd>{{ case.case_type | pretty }}</dd>
+        <dt>Status</dt><dd><span class="pill st-{{ case.status | slug }}">{{ case.status | pretty }}</span></dd>
+        <dt>Filed</dt><dd>{{ case.filed_at | ts }}</dd>
+        <dt>Station</dt><dd>#{{ case.station_id }}</dd>
+        <dt>Lead officer</dt><dd>{% if case.lead_officer_id %}#{{ case.lead_officer_id }}{% else %}not assigned{% endif %}</dd>
+    </dl>
+</section>
+{% else %}
+<h1>Case unavailable</h1>
+{% endif %}
+{% endblock %}

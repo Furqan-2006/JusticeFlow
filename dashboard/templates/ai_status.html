@@ -1,1 +1,17 @@
-a
+{% extends "base.html" %}
+{% block title %}AI Agents — JusticeFlow{% endblock %}
+{% block content %}
+<h1>AI agents</h1>
+<p class="lede">Status of the hotspot, priority and workload agents, read from the daemon's shared status table.</p>
+<div class="grid three" id="live-agents">
+    {% for a in agents %}
+    <section class="card agent">
+        <h2>{{ a.name | pretty }}</h2>
+        <span class="pill {{ a.state }}">{{ a.label }}</span>
+        <p class="sub">Last update: {{ a.last_updated | epoch }}</p>
+        {% if a.error_detail %}<p class="sub err">{{ a.error_detail }}</p>{% endif %}
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/live_updates.js') }}"></script>{% endblock %}

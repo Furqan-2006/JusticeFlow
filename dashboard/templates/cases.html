@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Cases — JusticeFlow{% endblock %}
+{% block content %}
+<h1>Cases</h1>
+<section class="card">
+    {% if cases %}
+    <table>
+        <thead><tr><th>FIR</th><th>Type</th><th>Status</th><th>Filed</th></tr></thead>
+        <tbody>
+        {% for c in cases %}
+        <tr><td><a href="{{ url_for('case_detail', case_id=c.case_id) }}">{{ c.fir_number }}</a></td>
+            <td>{{ c.case_type | pretty }}</td>
+            <td><span class="pill st-{{ c.status | slug }}">{{ c.status | pretty }}</span></td>
+            <td>{{ c.filed_at | ts }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="pager">
+        {% if page > 1 %}<a href="{{ url_for('cases', page=page - 1) }}">&larr; Newer</a>{% else %}<span></span>{% endif %}
+        <span>Page {{ page }}</span>
+        {% if has_next %}<a href="{{ url_for('cases', page=page + 1) }}">Older &rarr;</a>{% else %}<span></span>{% endif %}
+    </div>
+    {% else %}<p class="empty">No cases on this page.</p>{% endif %}
+</section>
+{% endblock %}

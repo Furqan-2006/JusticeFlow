@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}JusticeFlow{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="{{ url_for('dashboard') }}">&#9878; JusticeFlow</a>
+        <nav>
+            {% set pages = [('dashboard', 'Overview'), ('cases', 'Cases'), ('analytics', 'AI Analytics'),
+                            ('workload', 'Workload'), ('ai_status', 'AI Agents'), ('os_metrics_page', 'OS Layer')] %}
+            {% for endpoint, label in pages %}
+            <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint or (endpoint == 'cases' and request.endpoint == 'case_detail') }}">{{ label }}</a>
+            {% endfor %}
+        </nav>
+    </header>
+    <main>
+        {% if errors %}
+        <div class="banner error" role="alert">
+            <strong>Some data could not be loaded.</strong>
+            {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+        </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer>Read-only view &middot; all data served by the JusticeFlow daemon through its API gateway</footer>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

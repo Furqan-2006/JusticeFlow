@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Workload — JusticeFlow{% endblock %}
+{% block content %}
+<h1>Officer workload</h1>
+<p class="lede">Active officers by number of open cases they are assigned to.</p>
+<section class="card">
+    {% if officers %}
+    <table>
+        <thead><tr><th>Officer</th><th>Rank</th><th>On duty</th><th>Open cases</th></tr></thead>
+        <tbody>
+        {% for o in officers %}
+        <tr><td>{{ o.name }}</td><td>{{ o.rank | pretty }}</td>
+            <td>{% if o.on_duty == 't' %}<span class="pill ok">on duty</span>{% else %}<span class="pill idle">off duty</span>{% endif %}</td>
+            <td class="bar-cell"><div class="bar" style="width: {{ ((o.active_cases | int) * 100 / busiest) | round | int }}%"></div>
+                <span>{{ o.active_cases }}</span></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p class="empty">No officer data.</p>{% endif %}
+</section>
+{% endblock %}

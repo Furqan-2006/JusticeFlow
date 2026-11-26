@@ -1,18 +1,48 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>JusticeFlow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-</head>
-<body>
-    <h1>JusticeFlow Dashboard</h1>
-    <nav>
-        <a href="{{ url_for('dashboard') }}">Home</a> |
-        <a href="{{ url_for('os_metrics_page') }}">OS Metrics</a>
-    </nav>
-    <div class="main-content">
-        <h2>Welcome!</h2>
-        <p>Use the navigation bar to view system OS metrics and analytics.</p>
-    </div>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Overview — JusticeFlow{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<section class="tiles">
+    <div class="tile"><span class="tile-label">Daemon uptime</span>
+        <span class="tile-value">{% if ping.uptime_seconds is defined %}{{ (ping.uptime_seconds | int) // 60 }}m {{ (ping.uptime_seconds | int) % 60 }}s{% else %}offline{% endif %}</span></div>
+    <div class="tile"><span class="tile-label">Active sessions</span><span class="tile-value">{{ sessions }}</span></div>
+    {% for a in agents %}
+    <div class="tile"><span class="tile-label">{{ a.name | pretty }} agent</span>
+        <span class="tile-value"><span class="pill {{ a.state }}">{{ a.label }}</span></span></div>
+    {% endfor %}
+</section>
+
+<div class="grid two">
+    <section class="card">
+        <h2>Latest cases</h2>
+        {% if recent %}
+        <table>
+            <thead><tr><th>FIR</th><th>Type</th><th>Status</th><th>Filed</th></tr></thead>
+            <tbody>
+            {% for c in recent %}
+            <tr><td><a href="{{ url_for('case_detail', case_id=c.case_id) }}">{{ c.fir_number }}</a></td>
+                <td>{{ c.case_type | pretty }}</td>
+                <td><span class="pill st-{{ c.status | slug }}">{{ c.status | pretty }}</span></td>
+                <td>{{ c.filed_at | ts }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="more"><a href="{{ url_for('cases') }}">All cases &rarr;</a></p>
+        {% else %}<p class="empty">No cases to show.</p>{% endif %}
+    </section>
+    <section class="card">
+        <h2>Busiest officers</h2>
+        {% if busiest %}
+        <table>
+            <thead><tr><th>Officer</th><th>Rank</th><th class="num">Open cases</th></tr></thead>
+            <tbody>
+            {% for o in busiest %}
+            <tr><td>{{ o.name }}</td><td>{{ o.rank | pretty }}</td><td class="num">{{ o.active_cases }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="more"><a href="{{ url_for('workload') }}">Full workload &rarr;</a></p>
+        {% else %}<p class="empty">No officer data.</p>{% endif %}
+    </section>
+</div>
+{% endblock %}
