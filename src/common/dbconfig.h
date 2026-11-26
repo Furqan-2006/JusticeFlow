@@ -24,7 +24,7 @@ namespace JusticeFlow
         int port = 5432;
         std::string dbname = "justiceflow";
         std::string user = "justice_app"; // Forced default for C++ layer
-        std::string password = "justiceflow123";
+        std::string password; // no default: supply JF_DB_PASS (validateSecurityRules rejects empty)
 
         // Connection pool and timeout settings
         int min_connections = 2;

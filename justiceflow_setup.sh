@@ -283,8 +283,10 @@ print_info "Creating 'justiceflow' database and user …"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='justiceflow'" | grep -q 1 && {
     print_skip "PostgreSQL role 'justiceflow'"
 } || {
-    sudo -u postgres psql -c "CREATE USER justiceflow WITH PASSWORD 'justiceflow123';" -q
-    print_ok "PostgreSQL user 'justiceflow' created (password: justiceflow123)"
+    JF_SETUP_DB_PASSWORD="${JF_SETUP_DB_PASSWORD:-$(openssl rand -hex 16)}"
+    sudo -u postgres psql -c "CREATE USER justiceflow WITH PASSWORD '${JF_SETUP_DB_PASSWORD}';" -q
+    print_ok "PostgreSQL user 'justiceflow' created"
+    print_info "Its password is: ${JF_SETUP_DB_PASSWORD}  (shown once; set JF_SETUP_DB_PASSWORD to choose your own)"
 }
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='justiceflow'" | grep -q 1 && {
@@ -324,5 +326,5 @@ echo    "  4. Compile C++:     cd src && make"
 echo    "  5. Run AI setup:    python3 ai/agents/hotspot.py --generate-data"
 echo ""
 echo -e "  ${CYAN}PostgreSQL connection string:${NC}"
-echo    "  postgresql://justiceflow:justiceflow123@localhost:5432/justiceflow"
+echo    "  postgresql://justiceflow:<password>@localhost:5432/justiceflow"
 echo ""

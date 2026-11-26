@@ -9,7 +9,7 @@ VENV_DIR="${REPO_ROOT}/.venv-ai-agents"
 : "${PGPORT:=5432}"
 : "${PGDATABASE:=justiceflow}"
 : "${PGUSER:=justice_ai}"
-: "${PGPASSWORD:=justiceflow123}"
+: "${PGPASSWORD:?set PGPASSWORD to the justice_ai role's password}"
 
 # --- Reader (dashboard/app) DB connection for printing output ---
 : "${PGREADUSER:=justice_app}"
