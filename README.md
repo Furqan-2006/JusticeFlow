@@ -17,6 +17,14 @@ JusticeFlow is a full-stack, multi-disciplinary system for managing police cases
 
 ---
 
+## ✅ Current Status
+
+The system runs end to end. `make demo` starts it and `make smoke` proves it: an officer signs in, registers an FIR, attaches evidence and issues a warrant; the daemon expires the warrant when its date passes; the three AI agents refresh hotspots, case priorities and workload suggestions; every change lands in an audit log that names the officer and cannot be altered by the application. The dashboard shows all of it and talks only to the daemon.
+
+[`docs/END_TO_END_REPORT.md`](docs/END_TO_END_REPORT.md) lists what was broken, what was fixed, and what is still open.
+
+---
+
 ## 🏗️ Architecture
 
 ```
@@ -62,6 +70,15 @@ JusticeFlow is a full-stack, multi-disciplinary system for managing police cases
                              + Officer Workload Balancer (ML)
 ```
 
+### How a request flows today
+
+1. The dashboard sends one JSON frame over `/tmp/justiceflow.sock` and never touches the database.
+2. The gateway's `CommandRouter` handles `LOGIN`, `LOGOUT` and `WHOAMI`, and rejects any data read or write that does not carry a valid session token.
+3. Reads and writes run as parameterised SQL through the OS layer's database connection. A write runs in its own transaction as the signed-in officer, so the audit triggers record who acted.
+4. A scheduler thread inside the daemon expires warrants and starts the AI agents, which write their results to the `analytics` schema. The daemon records each agent's outcome in shared memory for the AI Agents page.
+
+The gateway commands implemented are: `PING`, `GET_ACTIVE_SESSIONS`, `GET_AGENT_STATUS`, `GET_CASE_LIST`, `GET_CASE_BY_ID`, `GET_HOTSPOT_DATA`, `GET_PRIORITY_CASES`, `GET_OFFICER_WORKLOAD`, `LOGIN`, `LOGOUT`, `WHOAMI`, `REGISTER_FIR`, `ADD_EVIDENCE`, `GET_CASE_EVIDENCE`, `ISSUE_WARRANT` and `GET_CASE_WARRANTS`. The Subsystem 1/2/3 classes under `src/system/` are not on this request path yet; see the report for what that means.
+
 ---
 
 ## 📁 Repository Structure
@@ -69,47 +86,53 @@ JusticeFlow is a full-stack, multi-disciplinary system for managing police cases
 ```
 justiceflow/
 │
-├── dashboard/                      # Python Flask web interface (read-only today)
+├── dashboard/                      # Python Flask web interface (sign-in, cases, FIR/evidence/warrant forms, analytics)
 │   ├── app.py                      # Flask routes; every datum comes from the gateway
 │   ├── run.py                      # Entry point (127.0.0.1:5000; JF_DASHBOARD_HOST/PORT)
 │   ├── client/
 │   │   └── gateway.py              # Unix-socket client for /tmp/justiceflow.sock
-│   ├── templates/                  # base, dashboard, cases, case_detail, analytics,
-│   │                               # workload, ai_status, os_metrics
+│   ├── templates/                  # base, login, dashboard, cases, new_case, case_detail,
+│   │                               # analytics, workload, ai_status, os_metrics
 │   ├── static/                     # css/styles.css, js/live_updates.js (5 s polling)
 │   ├── legacy/                     # old Streamlit prototype (direct DB, mock data); unused
 │   └── requirements.txt            # Flask only. The dashboard never opens a DB connection
 │
 ├── db/                             # PostgreSQL database layer
-│   ├── 00_schema.sql               # Schema namespaces: public, audit, analytics
-│   ├── 01_types.sql                # Enum type catalog
-│   ├── 02_tables.sql               # Full relational schema
-│   ├── 03_functions.sql            # Stored procedures & validation functions
-│   ├── 04_triggers.sql             # Trigger wiring
-│   ├── 05_indexes.sql              # Index strategy
-│   ├── 06_permissions.sql          # Role grants & revokes
-│   ├── schema_patch.sql            # Live-schema migration patches
-│   └── generate_data.py            # Synthetic data seeding pipeline
+│   ├── schema/
+│   │   ├── 00_schema.sql           # Schemas (public, audit, analytics), extensions, roles
+│   │   ├── 01_types.sql            # Enum type catalog
+│   │   ├── 02_tables.sql           # Full relational schema
+│   │   ├── 03_functions.sql        # Stored procedures & validation functions
+│   │   ├── 04_triggers.sql         # Trigger wiring (audit, rank rules, number generators)
+│   │   ├── 05_indexes.sql          # Index strategy
+│   │   ├── 06_permissions.sql      # Role grants (application role cannot delete or alter audit rows)
+│   │   └── schema_patch.sql        # Fixes applied after the base schema
+│   └── data_generator/
+│       └── generate_data.py        # Synthetic data seeding (officers get password justice123)
 │
-├── docs/                           # UML diagrams, architecture diagrams, SDA deliverables
+├── scripts/
+│   └── demo.sh                     # Behind `make demo` / `make demo-stop`
+│
+├── docs/                           # UML and architecture diagrams, SDA deliverables,
+│                                   # END_TO_END_REPORT.md (what was fixed and what is open)
 │
 ├── src/                            # C++ backend + AI agents
 │   │
-│   ├── api_gateway/                # Flask ↔ C++ bridge / dispatcher
+│   ├── api_gateway/                # Unix-socket gateway: auth, token checks, write commands
 │   │   ├── include/
-│   │   │   ├── api_gateway.h       # Request dispatcher
-│   │   │   ├── command_router.h    # Routes commands to subsystems
-│   │   │   └── auth_validator.h    # Token + permission checks
+│   │   │   ├── api_gateway.h       # Starts the socket server
+│   │   │   ├── command_router.h    # LOGIN/LOGOUT/WHOAMI, token gate, write commands
+│   │   │   └── auth_validator.h    # Session-token check (calls shr_infra auth)
 │   │   ├── src/
-│   │   │   ├── api_gateway.cpp     # Init + main loop
-│   │   │   ├── command_router.cpp  # Subsystem routing logic
+│   │   │   ├── api_gateway.cpp     # Installs the router on the socket
+│   │   │   ├── command_router.cpp  # Login throttling, FIR / evidence / warrant writes
 │   │   │   └── auth_validator.cpp  # Auth checks (calls shr_infra auth)
 │   │   └── README.md
 │   │
 │   ├── ai_agents/
 │   │   ├── ha.py                   # Crime Hotspot Analyzer
 │   │   ├── pa.py                   # Case Priority Recommender
-│   │   └── workload.py             # Officer Workload Balancer (ML model)
+│   │   └── workload_agent.py       # Officer Workload Balancer (Hungarian assignment)
 │   │
 │   ├── common/                     # Shared C++ contracts
 │   │   ├── common.h                # Domain structs
@@ -127,14 +150,16 @@ justiceflow/
 │   │   │   │   ├── timer.h
 │   │   │   │   ├── job_executor.h
 │   │   │   │   ├── process_spawner.h
+│   │   │   │   ├── scheduler_runner.h  # 1 s ticker thread + the standing jobs
 │   │   │   │   └── signal_handler.h
 │   │   │   └── src/
 │   │   │       ├── scheduler.cpp
 │   │   │       ├── daemon.cpp          # double-fork + setsid
-│   │   │       ├── timer.cpp           # SIGALRM + setitimer
-│   │   │       ├── job_executor.cpp    # runs DB + AI jobs
+│   │   │       ├── timer.cpp           # SIGALRM + setitimer (not used by the daemon; see scheduler_runner)
+│   │   │       ├── job_executor.cpp    # warrant expiry, DB health check
 │   │   │       ├── process_spawner.cpp # spawn agents, reap them, record status
-│   │   │       └── signal_handler.cpp  # SIGCHLD, SIGALRM
+│   │   │       ├── scheduler_runner.cpp
+│   │   │       └── signal_handler.cpp  # SIGCHLD, SIGALRM (legacy path)
 │   │   │
 │   │   ├── ipc/                    # Abdullah — data plane
 │   │   │   ├── include/
@@ -251,6 +276,7 @@ justiceflow/
 │       └── subsystem3.cpp                  # Routing to managers
 │
 ├── tests/
+│   ├── smoke_test.py               # End-to-end demo story (`make smoke`)
 │   ├── db_test.cpp
 │   ├── os_layer_integration_test.cpp
 │   ├── os_smoke_test.cpp
@@ -259,7 +285,7 @@ justiceflow/
 ├── .gitignore
 ├── folder_structure.txt
 ├── justiceflow_setup.sh            # Ubuntu bootstrap / setup script
-├── MakeFile
+├── Makefile
 ├── requirements.txt                # Python dependencies
 └── README.md
 ```
