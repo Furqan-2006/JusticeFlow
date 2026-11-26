@@ -5,6 +5,8 @@
  *
  * Installed on the DomainSocket as its extension handler. It
  *   - serves LOGIN, LOGOUT and WHOAMI;
+ *   - serves the write commands REGISTER_FIR and ADD_EVIDENCE, which run as the
+ *     officer who owns the token so the audit trail names the real actor;
  *   - rejects data reads (cases, analytics, workload) that carry no valid
  *     session token, so nothing sensitive is served anonymously;
  *   - leaves PING and the system-status commands open, and lets everything
@@ -36,6 +38,9 @@ namespace api_gateway
         ipc::SocketResponse login(const ipc::SocketRequest &req);
         ipc::SocketResponse logout(const ipc::SocketRequest &req);
         ipc::SocketResponse whoami(const ipc::SocketRequest &req);
+        ipc::SocketResponse registerFir(const ipc::SocketRequest &req);
+        ipc::SocketResponse addEvidence(const ipc::SocketRequest &req);
+        ipc::SocketResponse caseEvidence(const ipc::SocketRequest &req);
 
         bool isLockedOut(const std::string &cnic);
         void recordFailure(const std::string &cnic);

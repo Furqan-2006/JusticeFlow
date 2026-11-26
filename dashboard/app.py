@@ -18,6 +18,14 @@ from client import gateway
 
 PAGE_SIZE = 25
 PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+CASE_TYPES = [
+    "MURDER", "ATTEMPTED_MURDER", "MANSLAUGHTER", "KIDNAPPING", "HUMAN_TRAFFICKING", "ROBBERY",
+    "ARMED_ROBBERY", "ASSAULT", "AGGRAVATED_ASSAULT", "RAPE", "SEXUAL_ASSAULT", "BURGLARY",
+    "HOME_INVASION", "ARSON", "VANDALISM", "DRUG_TRAFFICKING", "DRUG_POSSESSION", "TERRORISM",
+    "EXTORTION", "GANG_ACTIVITY", "THEFT", "FRAUD", "CYBERCRIME", "HIT_AND_RUN", "VEHICLE_THEFT",
+    "DOMESTIC_VIOLENCE", "HARASSMENT", "BRIBERY", "FORGERY", "PUBLIC_DISTURBANCE",
+]
+EVIDENCE_TYPES = ["PHYSICAL", "DIGITAL", "TESTIMONIAL", "FORENSIC", "DOCUMENTARY"]
 
 
 def create_app():
@@ -167,13 +175,40 @@ def create_app():
         return render_template("cases.html", errors=errors, cases=rows[:PAGE_SIZE],
                                page=page, has_next=len(rows) > PAGE_SIZE)
 
+    @app.route("/cases/new", methods=["GET", "POST"])
+    def new_case():
+        form = request.form if request.method == "POST" else {}
+        error = None
+        if request.method == "POST":
+            result = call("REGISTER_FIR", {k: form.get(k, "").strip() for k in (
+                "complainant_cnic", "case_type", "incident_address", "description",
+                "incident_date", "lat", "lon")})
+            if result["ok"]:
+                flash(f"FIR {result['data']['fir_number']} registered.")
+                return redirect(url_for("case_detail", case_id=result["data"]["case_id"]))
+            error = result["message"]
+        return render_template("new_case.html", error=error, form=form, case_types=CASE_TYPES), \
+            (400 if error else 200)
+
     @app.route("/cases/<int:case_id>")
     def case_detail(case_id):
         result = call("GET_CASE_BY_ID", {"case_id": case_id})
         if not result["ok"] and result["status"] not in (-1, *AUTH_FAILURES):
             abort(404)  # gateway answered: no such case
         errors = [] if result["ok"] else [result["message"]]
-        return render_template("case_detail.html", errors=errors, case=result["data"])
+        evidence = fetch("GET_CASE_EVIDENCE", {"case_id": case_id}, errors, "evidence", []) if result["ok"] else []
+        return render_template("case_detail.html", errors=errors, case=result["data"],
+                               evidence=evidence, evidence_types=EVIDENCE_TYPES)
+
+    @app.route("/cases/<int:case_id>/evidence", methods=["POST"])
+    def add_evidence(case_id):
+        result = call("ADD_EVIDENCE", {"case_id": case_id, **{k: request.form.get(k, "").strip() for k in (
+            "evidence_type", "description", "quantity", "file_path", "collection_location")}})
+        if result["ok"]:
+            flash(f"Evidence {result['data']['evidence_number']} recorded.")
+        else:
+            flash(f"Evidence not recorded: {result['message']}")
+        return redirect(url_for("case_detail", case_id=case_id))
 
     @app.route("/analytics")
     def analytics():

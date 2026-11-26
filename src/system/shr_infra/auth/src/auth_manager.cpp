@@ -168,21 +168,10 @@ namespace auth
 
     JusticeFlow::ResultCode AuthManager::validateRank(const JusticeFlow::SessionContext &session, int minimum_rank)
     {
-        // Map rank string to numeric value
-        int rank_value = 0;
-        if (session.rank == JusticeFlow::OfficerRank::CONSTABLE)
-            rank_value = 0;
-        else if (session.rank == JusticeFlow::OfficerRank::INSPECTOR)
-            rank_value = 1;
-        else if (session.rank == JusticeFlow::OfficerRank::SI)
-            rank_value = 2;
-        else if (session.rank == JusticeFlow::OfficerRank::DSP)
-            rank_value = 3;
-        else
-        {
-            Logger::error("[AuthManager] Unknown rank in session");
-            return JusticeFlow::ResultCode::INVALID_STATE;
-        }
+        // OfficerRank is declared in order of seniority (CONSTABLE lowest, IGP
+        // highest), the same order as the database enum, and callers pass
+        // static_cast<int>(OfficerRank::X) as the minimum.
+        const int rank_value = static_cast<int>(session.rank);
 
         if (rank_value >= minimum_rank)
         {
@@ -236,27 +225,27 @@ namespace auth
 
     static bool parseOfficerRank(const std::string &rank, JusticeFlow::OfficerRank &out_rank)
     {
-        if (rank == "CONSTABLE")
+        using JusticeFlow::OfficerRank;
+        static const struct
         {
-            out_rank = JusticeFlow::OfficerRank::CONSTABLE;
-            return true;
-        }
-        if (rank == "INSPECTOR")
+            const char *name;
+            OfficerRank value;
+        } kRanks[] = {
+            {"CONSTABLE", OfficerRank::CONSTABLE}, {"HEAD_CONSTABLE", OfficerRank::HEAD_CONSTABLE},
+            {"ASI", OfficerRank::ASI},             {"SI", OfficerRank::SI},
+            {"INSPECTOR", OfficerRank::INSPECTOR}, {"DSP", OfficerRank::DSP},
+            {"SP", OfficerRank::SP},               {"SSP", OfficerRank::SSP},
+            {"DIG", OfficerRank::DIG},             {"ADDL_IG", OfficerRank::ADDL_IG},
+            {"IGP", OfficerRank::IGP},
+        };
+        for (const auto &r : kRanks)
         {
-            out_rank = JusticeFlow::OfficerRank::INSPECTOR;
-            return true;
+            if (rank == r.name)
+            {
+                out_rank = r.value;
+                return true;
+            }
         }
-        if (rank == "SI")
-        {
-            out_rank = JusticeFlow::OfficerRank::SI;
-            return true;
-        }
-        if (rank == "DSP")
-        {
-            out_rank = JusticeFlow::OfficerRank::DSP;
-            return true;
-        }
-
         return false;
     }
 

@@ -89,6 +89,18 @@ namespace ipc
             const std::string &query,
             std::vector<std::vector<std::string>> &results);
 
+        /**
+         * Runs one parameterised write as `officer_id` (see UnixSocket::executeAs):
+         * the acting officer is recorded for the audit trail and the statement
+         * runs in its own transaction. Prefer this over executeQuery() for any
+         * statement that uses client-supplied values.
+         */
+        JusticeFlow::ResultCode executeAs(long officer_id,
+                                          const std::string &sql,
+                                          const std::vector<std::string> &params,
+                                          std::vector<std::vector<std::string>> &results,
+                                          DbError *err = nullptr);
+
         // ========== Agent Status Interface ==========
 
         /**

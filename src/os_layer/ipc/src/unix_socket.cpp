@@ -152,6 +152,89 @@ namespace ipc
         return JusticeFlow::ResultCode::OK;
     }
 
+    JusticeFlow::ResultCode UnixSocket::executeAs(long officer_id,
+                                                  const std::string &sql,
+                                                  const std::vector<std::string> &params,
+                                                  std::vector<std::vector<std::string>> &out_results,
+                                                  DbError *err)
+    {
+        auto fail = [&](PGresult *res, const char *fallback)
+        {
+            if (err)
+            {
+                const char *state = res ? PQresultErrorField(res, PG_DIAG_SQLSTATE) : nullptr;
+                const char *msg = res ? PQresultErrorField(res, PG_DIAG_MESSAGE_PRIMARY) : nullptr;
+                err->sqlstate = state ? state : "";
+                err->message = msg ? msg : fallback;
+            }
+            if (res)
+                PQclear(res);
+            // Always leave the connection clean for the next caller.
+            PGresult *rb = PQexec(conn, "ROLLBACK");
+            PQclear(rb);
+            releaseLock();
+            return JusticeFlow::ResultCode::DB_ERROR;
+        };
+
+        if (!acquireLock())
+            return JusticeFlow::ResultCode::INVALID_STATE;
+
+        if (conn == nullptr || PQstatus(conn) != CONNECTION_OK)
+        {
+            releaseLock();
+            if (err)
+                *err = {"08000", "database connection unavailable"};
+            return JusticeFlow::ResultCode::DB_ERROR;
+        }
+
+        PGresult *res = PQexec(conn, "BEGIN");
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+            return fail(res, "could not start transaction");
+        PQclear(res);
+
+        const std::string who = std::to_string(officer_id);
+        const char *who_param[1] = {who.c_str()};
+        res = PQexecParams(conn, "SELECT set_config('app.current_officer_id', $1, true)",
+                           1, nullptr, who_param, nullptr, nullptr, 0);
+        if (PQresultStatus(res) != PGRES_TUPLES_OK)
+            return fail(res, "could not set acting officer");
+        PQclear(res);
+
+        std::vector<const char *> values;
+        values.reserve(params.size());
+        for (const auto &p : params)
+            values.push_back(p.c_str());
+
+        res = PQexecParams(conn, sql.c_str(), static_cast<int>(values.size()), nullptr,
+                           values.data(), nullptr, nullptr, 0);
+        const ExecStatusType st = PQresultStatus(res);
+        if (st != PGRES_COMMAND_OK && st != PGRES_TUPLES_OK)
+        {
+            Logger::error(("[IPC] Write failed: " + std::string(PQerrorMessage(conn))).c_str());
+            return fail(res, "statement failed");
+        }
+
+        out_results.clear();
+        const int rows = PQntuples(res);
+        const int cols = PQnfields(res);
+        for (int i = 0; i < rows; ++i)
+        {
+            std::vector<std::string> row;
+            for (int j = 0; j < cols; ++j)
+                row.push_back(PQgetvalue(res, i, j));
+            out_results.push_back(std::move(row));
+        }
+        PQclear(res);
+
+        res = PQexec(conn, "COMMIT");
+        if (PQresultStatus(res) != PGRES_COMMAND_OK)
+            return fail(res, "commit failed");
+        PQclear(res);
+
+        releaseLock();
+        return JusticeFlow::ResultCode::OK;
+    }
+
     JusticeFlow::ResultCode UnixSocket::lock()
     {
         int ret = pthread_mutex_lock(&db_mutex);

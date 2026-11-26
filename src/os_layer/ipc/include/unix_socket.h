@@ -21,6 +21,13 @@ namespace ipc
      * PGconn simultaneously causes data races. This class enforces serialization
      * via mutex.
      */
+    /// Why a write failed: the PostgreSQL SQLSTATE and its primary message.
+    struct DbError
+    {
+        std::string sqlstate;
+        std::string message;
+    };
+
     class UnixSocket
     {
     private:
@@ -81,6 +88,23 @@ namespace ipc
          * @return ResultCode::OK on success, DB_ERROR on failure
          */
         JusticeFlow::ResultCode execute(const std::string &query, std::vector<std::vector<std::string>> &out_results);
+
+        /**
+         * Runs one parameterised statement as `officer_id` in its own transaction.
+         *
+         * Under a single hold of the lock it does BEGIN, sets
+         * app.current_officer_id (transaction-local, so the audit triggers record
+         * who acted), runs `sql` with $1..$n bound from `params` (values are never
+         * spliced into the SQL text), then COMMITs; any failure ROLLBACKs.
+         *
+         * @param err  Filled with SQLSTATE and message when the statement fails.
+         * @return OK, or DB_ERROR (details in *err).
+         */
+        JusticeFlow::ResultCode executeAs(long officer_id,
+                                          const std::string &sql,
+                                          const std::vector<std::string> &params,
+                                          std::vector<std::vector<std::string>> &out_results,
+                                          DbError *err = nullptr);
 
         /**
          * Explicitly acquires the database lock.

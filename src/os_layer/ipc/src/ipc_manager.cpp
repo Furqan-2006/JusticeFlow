@@ -54,6 +54,14 @@ namespace ipc
         return db_socket.execute(query, results);
     }
 
+    JusticeFlow::ResultCode IpcManager::executeAs(long officer_id, const std::string &sql,
+                                                  const std::vector<std::string> &params,
+                                                  std::vector<std::vector<std::string>> &results,
+                                                  DbError *err)
+    {
+        return db_socket.executeAs(officer_id, sql, params, results, err);
+    }
+
     JusticeFlow::ResultCode IpcManager::readAgentStatus(int agent_index, AgentStatusMessage &out_msg)
     {
         std::string target_fifo;

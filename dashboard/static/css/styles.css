@@ -72,3 +72,8 @@ tbody tr:nth-child(even) { background: #f8fafc; }
 .card.login { max-width: 22rem; margin: 3rem auto; }
 .card.login label { display: block; margin: .75rem 0; }
 .card.login input { display: block; width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
+
+form.stack label { display: block; margin: .6rem 0; }
+form.stack input, form.stack select, form.stack textarea { display: block; width: 100%; max-width: 32rem; padding: .45rem; margin-top: .2rem; box-sizing: border-box; }
+form.stack textarea { min-height: 4.5rem; }
+a.button { font-size: .85rem; margin-left: .75rem; padding: .3rem .7rem; border: 1px solid currentColor; border-radius: 4px; text-decoration: none; vertical-align: middle; }

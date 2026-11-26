@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Register FIR — JusticeFlow{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('cases') }}">&larr; Cases</a></p>
+<h1>Register FIR</h1>
+<section class="card">
+    {% if error %}<div class="banner error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" class="stack">
+        <label>Complainant CNIC <input name="complainant_cnic" value="{{ form.get('complainant_cnic', '') }}" placeholder="42101-1234567-1" required></label>
+        <label>Case type <select name="case_type">{% for t in case_types %}<option value="{{ t }}" {{ 'selected' if form.get('case_type') == t }}>{{ t | pretty }}</option>{% endfor %}</select></label>
+        <label>Incident date and time <input name="incident_date" type="datetime-local" value="{{ form.get('incident_date', '') }}" required></label>
+        <label>Incident address <input name="incident_address" value="{{ form.get('incident_address', '') }}" required></label>
+        <label>Description <textarea name="description" required maxlength="2000">{{ form.get('description', '') }}</textarea></label>
+        <label>Latitude (optional) <input name="lat" value="{{ form.get('lat', '') }}"></label>
+        <label>Longitude (optional) <input name="lon" value="{{ form.get('lon', '') }}"></label>
+        <button type="submit">Register FIR</button>
+    </form>
+</section>
+{% endblock %}

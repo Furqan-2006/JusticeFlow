@@ -114,6 +114,32 @@ namespace api_gateway
             oss << ",\"expires_at\":" << static_cast<long>(s.expiresAt);
             return oss.str();
         }
+
+        constexpr size_t kMaxTextBytes = 4000;
+
+        // Turn a failed write into the response the client sees. Business-rule
+        // violations raised by our own triggers (P0001) carry a readable message;
+        // anything else gets a generic one so schema details do not leak.
+        SocketResponse writeFailure(uint32_t id, const ipc::DbError &e)
+        {
+            if (e.sqlstate == "P0001")
+            {
+                const bool rank = e.message.find("not authorized") != std::string::npos ||
+                                  e.message.find("rank") != std::string::npos;
+                return SocketResponse::error(id, rank ? ResultCode::RANK_INSUFFICIENT : ResultCode::INVALID_STATE,
+                                             e.message);
+            }
+            if (e.sqlstate == "23503")
+                return SocketResponse::error(id, ResultCode::FOREIGN_KEY_VIOLATION,
+                                             "A referenced record does not exist (check the complainant CNIC)");
+            if (e.sqlstate == "23505")
+                return SocketResponse::error(id, ResultCode::ALREADY_EXISTS, "Record already exists");
+            if (e.sqlstate.rfind("22", 0) == 0 || e.sqlstate.rfind("23", 0) == 0)
+                return SocketResponse::error(id, ResultCode::INVALID_INPUT, "Invalid input");
+            return SocketResponse::error(id, ResultCode::DB_ERROR, "Database error");
+        }
+
+        bool tooLong(const std::string &s) { return s.size() > kMaxTextBytes; }
     } // namespace
 
     // ── throttle ──────────────────────────────────────────────────────────────
@@ -198,6 +224,141 @@ namespace api_gateway
         return SocketResponse::ok(req.request_id, "{" + officerJson(session) + "}");
     }
 
+    SocketResponse CommandRouter::registerFir(const SocketRequest &req)
+    {
+        JusticeFlow::SessionContext s;
+        const ResultCode rc = validator_.validate(req.param("token"), s);
+        if (rc != ResultCode::OK)
+            return SocketResponse::error(req.request_id,
+                                         rc == ResultCode::SESSION_EXPIRED ? rc : ResultCode::AUTH_FAILED,
+                                         "Authentication required");
+
+        // Mirrors the database rule: only ASI, SI and INSPECTOR may file an FIR.
+        using JusticeFlow::OfficerRank;
+        if (s.rank != OfficerRank::ASI && s.rank != OfficerRank::SI && s.rank != OfficerRank::INSPECTOR)
+            return SocketResponse::error(req.request_id, ResultCode::RANK_INSUFFICIENT,
+                                         "Only ASI, SI or Inspector rank may register an FIR");
+
+        const std::string cnic = req.param("complainant_cnic");
+        const std::string type = req.param("case_type");
+        const std::string address = req.param("incident_address");
+        const std::string text = req.param("description");
+        const std::string when = req.param("incident_date");
+        if (cnic.empty() || type.empty() || address.empty() || text.empty() || when.empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT,
+                                         "complainant_cnic, case_type, incident_address, description and incident_date are required");
+        if (tooLong(address) || tooLong(text))
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT, "Text too long");
+
+        std::vector<std::vector<std::string>> rows;
+        ipc::DbError err;
+        // The FIR is always filed at the officer's own station, by the officer.
+        const auto db = ipc::IpcManager::getInstance().executeAs(
+            s.officerId,
+            "INSERT INTO cases (fir_number, case_type, incident_date, incident_address, "
+            "incident_description, incident_lat, incident_lon, station_id, primary_complainant_cnic, filed_by) "
+            "VALUES ('', $1::case_type_enum, $2::timestamptz, $3, $4, NULLIF($5,'')::numeric, "
+            "NULLIF($6,'')::numeric, $7::bigint, $8, $9::bigint) "
+            "RETURNING case_id, fir_number, case_status::text",
+            {type, when, address, text, req.param("lat"), req.param("lon"),
+             std::to_string(s.stationId), cnic, std::to_string(s.officerId)},
+            rows, &err);
+        if (db != ResultCode::OK || rows.empty())
+            return writeFailure(req.request_id, err);
+
+        Logger::info("[Gateway] FIR registered");
+        std::ostringstream oss;
+        oss << "{\"case_id\":" << q(rows[0][0]) << ",\"fir_number\":" << q(rows[0][1])
+            << ",\"status\":" << q(rows[0][2]) << '}';
+        return SocketResponse::ok(req.request_id, oss.str());
+    }
+
+    SocketResponse CommandRouter::addEvidence(const SocketRequest &req)
+    {
+        JusticeFlow::SessionContext s;
+        const ResultCode rc = validator_.validate(req.param("token"), s);
+        if (rc != ResultCode::OK)
+            return SocketResponse::error(req.request_id,
+                                         rc == ResultCode::SESSION_EXPIRED ? rc : ResultCode::AUTH_FAILED,
+                                         "Authentication required");
+
+        const std::string case_id = req.param("case_id");
+        const std::string type = req.param("evidence_type");
+        const std::string text = req.param("description");
+        if (case_id.empty() || type.empty() || text.empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT,
+                                         "case_id, evidence_type and description are required");
+        if (tooLong(text) || tooLong(req.param("collection_location")) || req.param("file_path").size() > 255)
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT, "Text too long");
+        if ((type == "DIGITAL" || type == "DOCUMENTARY") && req.param("file_path").empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT,
+                                         "file_path is required for DIGITAL and DOCUMENTARY evidence");
+
+        std::vector<std::vector<std::string>> rows;
+        ipc::DbError err;
+        // Only the case's own station may add evidence, and not once it is closed.
+        const auto db = ipc::IpcManager::getInstance().executeAs(
+            s.officerId,
+            "INSERT INTO evidence (evidence_number, case_id, evidence_type, description, quantity, "
+            "file_path, collected_by, collection_location) "
+            "SELECT '', c.case_id, $2::evidence_type_enum, $3, COALESCE(NULLIF($4,'')::smallint, 1), "
+            "NULLIF($5,''), $6::bigint, NULLIF($7,'') "
+            "FROM cases c WHERE c.case_id = $1::bigint AND c.station_id = $8::bigint "
+            "AND c.case_status <> 'CLOSED' "
+            "RETURNING evidence_id, evidence_number, evidence_type::text",
+            {case_id, type, text, req.param("quantity"), req.param("file_path"),
+             std::to_string(s.officerId), req.param("collection_location"), std::to_string(s.stationId)},
+            rows, &err);
+        if (db != ResultCode::OK)
+            return writeFailure(req.request_id, err);
+        if (rows.empty())
+            return SocketResponse::error(req.request_id, ResultCode::NOT_FOUND,
+                                         "No open case with that id at your station");
+
+        Logger::info("[Gateway] Evidence added");
+        std::ostringstream oss;
+        oss << "{\"evidence_id\":" << q(rows[0][0]) << ",\"evidence_number\":" << q(rows[0][1])
+            << ",\"evidence_type\":" << q(rows[0][2]) << '}';
+        return SocketResponse::ok(req.request_id, oss.str());
+    }
+
+    SocketResponse CommandRouter::caseEvidence(const SocketRequest &req)
+    {
+        JusticeFlow::SessionContext s;
+        const ResultCode rc = validator_.validate(req.param("token"), s);
+        if (rc != ResultCode::OK)
+            return SocketResponse::error(req.request_id,
+                                         rc == ResultCode::SESSION_EXPIRED ? rc : ResultCode::AUTH_FAILED,
+                                         "Authentication required");
+        if (req.param("case_id").empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT, "case_id is required");
+
+        std::vector<std::vector<std::string>> rows;
+        ipc::DbError err;
+        if (ipc::IpcManager::getInstance().executeAs(
+                s.officerId,
+                "SELECT e.evidence_number, e.evidence_type::text, e.evidence_status::text, e.description, "
+                "e.quantity, COALESCE(e.file_path,''), e.collected_at::text, p.full_name "
+                "FROM evidence e JOIN officers o ON o.officer_id = e.collected_by "
+                "JOIN persons p ON p.cnic = o.cnic "
+                "WHERE e.case_id = $1::bigint AND NOT e.is_deleted ORDER BY e.evidence_id",
+                {req.param("case_id")}, rows, &err) != ResultCode::OK)
+            return writeFailure(req.request_id, err);
+
+        std::ostringstream oss;
+        oss << "{\"evidence\":[";
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const auto &r = rows[i];
+            oss << (i ? "," : "") << "{\"evidence_number\":" << q(r[0]) << ",\"evidence_type\":" << q(r[1])
+                << ",\"status\":" << q(r[2]) << ",\"description\":" << q(r[3]) << ",\"quantity\":" << q(r[4])
+                << ",\"file_path\":" << q(r[5]) << ",\"collected_at\":" << q(r[6])
+                << ",\"collected_by\":" << q(r[7]) << '}';
+        }
+        oss << "]}";
+        return SocketResponse::ok(req.request_id, oss.str());
+    }
+
     bool CommandRouter::handle(const SocketRequest &req, SocketResponse &out)
     {
         if (req.command_name == "LOGIN")
@@ -208,6 +369,21 @@ namespace api_gateway
         if (req.command_name == "LOGOUT")
         {
             out = logout(req);
+            return true;
+        }
+        if (req.command_name == "REGISTER_FIR")
+        {
+            out = registerFir(req);
+            return true;
+        }
+        if (req.command_name == "ADD_EVIDENCE")
+        {
+            out = addEvidence(req);
+            return true;
+        }
+        if (req.command_name == "GET_CASE_EVIDENCE")
+        {
+            out = caseEvidence(req);
             return true;
         }
         if (req.command_name == "WHOAMI")
