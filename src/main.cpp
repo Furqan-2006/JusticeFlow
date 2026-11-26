@@ -5,11 +5,15 @@
 #include "interface/cli.h"
 #include "common/logger.h"
 #include "common/constants.h"
+#include "os_layer/ipc/include/ipc_manager.h"
 
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
 #include <thread>
+#include <csignal>
+#include <fstream>
+#include <unistd.h>
 
 // Global orchestrator
 std::unique_ptr<class JusticeFlowOrchestrator> g_orchestrator;
@@ -89,6 +93,27 @@ public:
             Logger::info("✓ SystemManager initialized");
 
             // ================================================================
+            // PHASE 1b: OS layer — database connection and shared status table
+            // The gateway answers status commands from these, so both must
+            // exist before it starts accepting connections.
+            // ================================================================
+            auto &ipc_mgr = ipc::IpcManager::getInstance();
+
+            if (ipc_mgr.connectDatabase() != JusticeFlow::ResultCode::OK)
+            {
+                Logger::error("IPC database connection failed");
+                return false;
+            }
+            Logger::info("✓ IPC database connected");
+
+            if (ipc_mgr.initSharedMemory() != JusticeFlow::ResultCode::OK)
+            {
+                Logger::error("Shared status table creation failed");
+                return false;
+            }
+            Logger::info("✓ Shared status table ready");
+
+            // ================================================================
             // PHASE 2: Initialize API Gateway
             // ================================================================
             Logger::info("Phase 2: Initializing API Gateway...");
@@ -149,6 +174,36 @@ public:
     }
 
     /**
+     * Run headless: serve the API gateway until SIGINT or SIGTERM.
+     *
+     * Both signals are blocked in every thread (main() blocks them before any
+     * thread exists), so sigwait() below is the single place they are received.
+     * Shutdown then runs in normal context, not inside a signal handler.
+     */
+    int runHeadless()
+    {
+        if (!m_initialized)
+        {
+            Logger::error("System not initialized");
+            return 1;
+        }
+
+        sigset_t stop_signals;
+        sigemptyset(&stop_signals);
+        sigaddset(&stop_signals, SIGINT);
+        sigaddset(&stop_signals, SIGTERM);
+
+        Logger::info("Headless mode: serving gateway until SIGINT/SIGTERM");
+
+        int received = 0;
+        sigwait(&stop_signals, &received);
+
+        Logger::info(received == SIGTERM ? "Received SIGTERM, shutting down gracefully..."
+                                         : "Received SIGINT, shutting down gracefully...");
+        return 0;
+    }
+
+    /**
      * Graceful shutdown
      */
     void shutdown()
@@ -165,6 +220,10 @@ public:
             m_api_gateway->stop();
             m_api_gateway.reset();
         }
+
+        // Release OS-layer resources: no stale shared memory after a clean exit
+        ipc::IpcManager::getInstance().destroySharedMemory();
+        ipc::IpcManager::getInstance().disconnectDatabase();
 
         // Shutdown SystemManager
         auto &sys_mgr = system_layer::SystemManager::getInstance();
@@ -222,6 +281,8 @@ void print_usage(const char *program_name)
               << "Options:\n"
               << "  -c, --config PATH       Path to config file\n"
               << "  -l, --log-level LEVEL   Log level (DEBUG, INFO, WARN, ERROR)\n"
+              << "      --headless          No CLI; serve the API gateway until SIGINT/SIGTERM\n"
+              << "      --pid-file PATH     Write the process id to PATH (removed on exit)\n"
               << "  -v, --version           Show version\n"
               << "  -h, --help              Show this help\n";
 }
@@ -238,6 +299,8 @@ struct CLIArgs
     std::string log_level = "INFO";
     bool show_version = false;
     bool show_help = false;
+    bool headless = false;
+    std::string pid_file;
 };
 
 CLIArgs parse_args(int argc, char *argv[])
@@ -259,6 +322,14 @@ CLIArgs parse_args(int argc, char *argv[])
         else if ((arg == "-c" || arg == "--config") && i + 1 < argc)
         {
             args.config_path = argv[++i];
+        }
+        else if (arg == "--headless")
+        {
+            args.headless = true;
+        }
+        else if (arg == "--pid-file" && i + 1 < argc)
+        {
+            args.pid_file = argv[++i];
         }
         else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc)
         {
@@ -293,6 +364,17 @@ int main(int argc, char *argv[])
         {
             print_version();
             return 0;
+        }
+
+        // Headless: block SIGINT/SIGTERM now, before any thread is created, so
+        // every thread inherits the mask and runHeadless() receives them via sigwait.
+        if (args.headless)
+        {
+            sigset_t stop_signals;
+            sigemptyset(&stop_signals);
+            sigaddset(&stop_signals, SIGINT);
+            sigaddset(&stop_signals, SIGTERM);
+            pthread_sigmask(SIG_BLOCK, &stop_signals, nullptr);
         }
 
         // ====================================================================
@@ -337,8 +419,11 @@ int main(int argc, char *argv[])
         // ====================================================================
         Logger::info("Registering signal handlers...");
 
-        std::signal(SIGINT, handle_sigint);
-        std::signal(SIGTERM, handle_sigterm);
+        if (!args.headless)
+        {
+            std::signal(SIGINT, handle_sigint);
+            std::signal(SIGTERM, handle_sigterm);
+        }
         std::signal(SIGHUP, handle_sighup);
         std::signal(SIGPIPE, SIG_IGN);
 
@@ -373,13 +458,25 @@ int main(int argc, char *argv[])
         // ====================================================================
         Logger::info("Starting CLI interface...");
 
-        int exit_code = g_orchestrator->run();
+        if (!args.pid_file.empty())
+        {
+            std::ofstream pid_out(args.pid_file);
+            pid_out << getpid() << "\n";
+        }
+
+        int exit_code = args.headless ? g_orchestrator->runHeadless()
+                                      : g_orchestrator->run();
 
         // ====================================================================
         // PHASE 9: CLEANUP
         // ====================================================================
         Logger::info("Shutting down system...");
         g_orchestrator.reset();
+
+        if (!args.pid_file.empty())
+        {
+            std::remove(args.pid_file.c_str());
+        }
 
         Logger::info("========================================");
         Logger::info("JusticeFlow System Stopped");

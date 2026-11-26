@@ -55,6 +55,9 @@ namespace ipc
 
         mapped_table = static_cast<SharedStatusTable *>(raw_ptr);
 
+        // A segment left by a crashed run may hold stale data: start from zero.
+        std::memset(mapped_table, 0, sizeof(SharedStatusTable));
+
         // Initialize robust, process-shared mutex (this SHM really is shared)
         pthread_mutexattr_t attr;
         pthread_mutexattr_init(&attr);
@@ -64,8 +67,23 @@ namespace ipc
         pthread_mutex_init(&mapped_table->mutex, &attr);
         pthread_mutexattr_destroy(&attr);
 
-        // NOTE: Contract SharedStatusTable has ONLY mutex + agents[].
-        // No pthread_cond_t to initialize.
+        // Process-shared condition variable (see shm_layout.h)
+        pthread_condattr_t cond_attr;
+        pthread_condattr_init(&cond_attr);
+        pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED);
+        pthread_cond_init(&mapped_table->cond_var, &cond_attr);
+        pthread_condattr_destroy(&cond_attr);
+
+        mapped_table->active_sessions = 0;
+
+        // Name the three agent slots so the status endpoint is meaningful
+        // before any agent has reported: [0]=hotspot [1]=priority [2]=workload
+        static const char *const kAgentNames[3] = {"hotspot", "priority", "workload"};
+        for (int i = 0; i < 3; ++i)
+        {
+            std::strncpy(mapped_table->agents[i].agent_name, kAgentNames[i],
+                         sizeof(mapped_table->agents[i].agent_name) - 1);
+        }
 
         is_creator = true;
         Logger::info(("[OS][IPC] Shared Memory created: " + shm_name).c_str());

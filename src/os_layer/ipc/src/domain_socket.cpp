@@ -269,11 +269,12 @@ namespace ipc
         if (!running_.exchange(false))
             return; // Already stopped
 
-        // Closing server_fd_ causes accept() in the accept thread to return
-        // with EBADF / EINVAL, allowing the thread to notice running_ == false
-        // and exit cleanly.
+        // On Linux, close() alone does NOT wake a thread blocked in accept():
+        // pthread_join below would wait forever. shutdown() makes accept()
+        // return (EINVAL) so the thread sees running_ == false and exits.
         if (server_fd_ >= 0)
         {
+            ::shutdown(server_fd_, SHUT_RDWR);
             ::close(server_fd_);
             server_fd_ = -1;
         }
