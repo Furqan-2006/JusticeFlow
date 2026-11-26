@@ -106,6 +106,37 @@ namespace ipc
             return s.substr(start, pos - start);
         }
 
+        // Consume one balanced {...} or [...] value starting at s[pos] and return
+        // its raw text. Braces inside string literals are ignored.
+        std::string parseBalanced(const std::string &s, size_t &pos)
+        {
+            const size_t start = pos;
+            int depth = 0;
+            bool in_string = false;
+            while (pos < s.size())
+            {
+                const char c = s[pos++];
+                if (in_string)
+                {
+                    if (c == '\\' && pos < s.size())
+                        ++pos; // skip the escaped character
+                    else if (c == '"')
+                        in_string = false;
+                    continue;
+                }
+                if (c == '"')
+                    in_string = true;
+                else if (c == '{' || c == '[')
+                    ++depth;
+                else if (c == '}' || c == ']')
+                {
+                    if (--depth == 0)
+                        return s.substr(start, pos - start);
+                }
+            }
+            throw std::runtime_error("unterminated JSON value");
+        }
+
         // Parse a flat JSON object { "key":"val", ... } where all values are
         // strings or simple primitives.  Returns key→raw-value map.
         // Throws on structural errors.
@@ -132,6 +163,8 @@ namespace ipc
                 std::string val;
                 if (s[pos] == '"')
                     val = parseString(s, pos);
+                else if (s[pos] == '{' || s[pos] == '[')
+                    val = parseBalanced(s, pos); // nested value: kept raw, e.g. "params"
                 else
                     val = parsePrimitive(s, pos);
 

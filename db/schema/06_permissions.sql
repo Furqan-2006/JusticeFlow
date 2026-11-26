@@ -44,3 +44,21 @@ GRANT USAGE, SELECT ON SEQUENCES TO justice_ai;
 
 -- AI agents have zero access to audit schema
 REVOKE ALL ON SCHEMA audit FROM justice_ai;
+
+-- ---------------------------------------------------------------------
+-- Application role: the C++ daemon and API gateway connect as justice_app.
+-- Read and write the transactional tables; never DELETE (records are
+-- legal evidence: cancel or expire them, do not remove them).
+-- ---------------------------------------------------------------------
+GRANT USAGE ON SCHEMA public TO justice_app;
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO justice_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO justice_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE ON TABLES TO justice_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT USAGE, SELECT ON SEQUENCES TO justice_app;
+
+-- Dashboard reads the AI agents' predictions; agents alone write them.
+GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO justice_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA analytics
+GRANT SELECT ON TABLES TO justice_app;

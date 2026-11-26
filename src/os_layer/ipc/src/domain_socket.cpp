@@ -102,28 +102,6 @@ namespace ipc
             return true;
         }
 
-        // Validate UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        bool isValidUuid(const std::string &s)
-        {
-            if (s.size() != 36)
-                return false;
-            for (size_t i = 0; i < 36; ++i)
-            {
-                if (i == 8 || i == 13 || i == 18 || i == 23)
-                {
-                    if (s[i] != '-')
-                        return false;
-                }
-                else
-                {
-                    char c = s[i];
-                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-                        return false;
-                }
-            }
-            return true;
-        }
-
         // Convert a rows-of-cols result set from executeQuery() to a JSON array.
         // colNames must match the number of columns in each row.
         std::string rowsToJsonArray(
@@ -658,9 +636,9 @@ namespace ipc
         std::string offset = safeIntStr(req.param("offset", "0"), 0, 0, MAX_SQL_OFFSET);
 
         std::string query =
-            "SELECT case_id, case_type, status, registered_at "
+            "SELECT case_id, fir_number, case_type, case_status, filed_at "
             "FROM cases "
-            "ORDER BY registered_at DESC "
+            "ORDER BY filed_at DESC, case_id DESC "
             "LIMIT " +
             limit +
             " OFFSET " + offset + ";";
@@ -676,33 +654,33 @@ namespace ipc
         }
 
         const std::vector<std::string> cols = {
-            "case_id", "case_type", "status", "registered_at"};
+            "case_id", "fir_number", "case_type", "status", "filed_at"};
 
         std::ostringstream oss;
         oss << "{\"cases\":" << rowsToJsonArray(cols, rows) << '}';
         return SocketResponse::ok(req.request_id, oss.str());
     }
 
-    // ── DB: single case by UUID ─────────────────────────────────────────────────
+    // ── DB: single case by id ───────────────────────────────────────────────────
 
     SocketResponse DomainSocket::handleGetCaseById(const SocketRequest &req)
     {
         std::string case_id = req.param("case_id", "");
-        if (!isValidUuid(case_id))
+        // cases.case_id is a BIGINT. Digits only, at most 18 of them (fits int64),
+        // so embedding it directly is safe.
+        if (!isAllDigits(case_id) || case_id.size() > 18)
         {
             return SocketResponse::error(req.request_id,
                                          JusticeFlow::ResultCode::INVALID_INPUT,
-                                         "Invalid or missing 'case_id' (expected UUID)");
+                                         "Invalid or missing 'case_id' (expected a number)");
         }
 
-        // case_id is UUID-validated; safe to embed directly.
         std::string query =
-            "SELECT case_id, case_type, status, registered_at, "
+            "SELECT case_id, fir_number, case_type, case_status, filed_at, "
             "       station_id, lead_officer_id "
             "FROM cases "
-            "WHERE case_id = '" +
-            case_id + "' "
-                      "LIMIT 1;";
+            "WHERE case_id = " +
+            case_id + " LIMIT 1;";
 
         std::vector<std::vector<std::string>> rows;
         JusticeFlow::ResultCode rc =
@@ -722,7 +700,7 @@ namespace ipc
         }
 
         const std::vector<std::string> cols = {
-            "case_id", "case_type", "status", "registered_at",
+            "case_id", "fir_number", "case_type", "status", "filed_at",
             "station_id", "lead_officer_id"};
 
         // Single row → JSON object (not array).
@@ -746,9 +724,11 @@ namespace ipc
         std::string limit = safeIntStr(req.param("limit", "50"), 50, 1, 200);
 
         std::string query =
-            "SELECT zone_id, zone_name, risk_level, incident_count, updated_at "
+            "SELECT hotspot_id, zone_label, risk_level, risk_score, case_count, "
+            "       patrol_increase_pct, recommendation_text, analyzed_at "
             "FROM analytics.crime_hotspots "
-            "ORDER BY incident_count DESC "
+            "WHERE analyzed_at = (SELECT max(analyzed_at) FROM analytics.crime_hotspots) "
+            "ORDER BY risk_score DESC "
             "LIMIT " +
             limit + ";";
 
@@ -763,7 +743,8 @@ namespace ipc
         }
 
         const std::vector<std::string> cols = {
-            "zone_id", "zone_name", "risk_level", "incident_count", "updated_at"};
+            "hotspot_id", "zone_label", "risk_level", "risk_score", "case_count",
+            "patrol_increase_pct", "recommendation_text", "analyzed_at"};
 
         std::ostringstream oss;
         oss << "{\"hotspots\":" << rowsToJsonArray(cols, rows) << '}';
@@ -796,32 +777,21 @@ namespace ipc
 
         std::string limit = safeIntStr(req.param("limit", "50"), 50, 1, 200);
 
-        // Priority ordering: CRITICAL > HIGH > MEDIUM > LOW
+        // Latest scoring run only, open cases only. priority_level_enum is declared
+        // LOW < MEDIUM < HIGH < CRITICAL, so >= works on the enum directly.
+        // min_priority is whitelisted above, so embedding it is safe.
         std::string query =
-            "SELECT c.case_id, c.case_type, c.status, "
-            "       ca.priority_level, ca.assignment_status, ca.assigned_at "
-            "FROM cases c "
-            "JOIN analytics.case_assignments ca ON ca.case_id = c.case_id "
-            "WHERE ca.priority_level IN ( "
-            "    SELECT unnest(ARRAY["
-            "        CASE WHEN '" +
-            min_priority + "' = 'LOW'      THEN 'LOW'      ELSE NULL END,"
-                           "        CASE WHEN '" +
-            min_priority + "' IN ('LOW','MEDIUM') THEN 'MEDIUM' ELSE NULL END,"
-                           "        CASE WHEN '" +
-            min_priority + "' IN ('LOW','MEDIUM','HIGH') THEN 'HIGH' ELSE NULL END,"
-                           "        'CRITICAL'"
-                           "    ]::text[]) "
-                           ") "
-                           "ORDER BY ca.priority_level DESC, ca.assigned_at ASC "
+            "SELECT c.case_id, c.fir_number, c.case_type, c.case_status, "
+            "       s.priority_level, s.priority_score, s.top_reason, s.analyzed_at "
+            "FROM analytics.case_priority_scores s "
+            "JOIN cases c ON c.case_id = s.case_id "
+            "WHERE s.analyzed_at = (SELECT max(analyzed_at) FROM analytics.case_priority_scores) "
+            "  AND c.case_status <> 'CLOSED' "
+            "  AND s.priority_level >= '" +
+            min_priority + "'::priority_level_enum "
+                           "ORDER BY s.priority_score DESC "
                            "LIMIT " +
             limit + ";";
-
-        // Note: The above priority filter is correct but verbose.
-        // A cleaner alternative when the schema stores priority as an ordered
-        // enum type is:
-        //   WHERE ca.priority_level >= '" + min_priority + "'::priority_level_enum
-        // Adjust to match actual schema type once confirmed.
 
         std::vector<std::vector<std::string>> rows;
         JusticeFlow::ResultCode rc =
@@ -834,8 +804,8 @@ namespace ipc
         }
 
         const std::vector<std::string> cols = {
-            "case_id", "case_type", "status",
-            "priority_level", "assignment_status", "assigned_at"};
+            "case_id", "fir_number", "case_type", "status",
+            "priority_level", "priority_score", "top_reason", "analyzed_at"};
 
         std::ostringstream oss;
         oss << "{\"cases\":" << rowsToJsonArray(cols, rows) << '}';
@@ -849,19 +819,20 @@ namespace ipc
         std::string limit = safeIntStr(req.param("limit", "50"), 50, 1, 200);
 
         std::string query =
-            "SELECT o.officer_id, o.name, o.rank, o.status, "
-            "       COUNT(co.case_id) AS active_cases, "
-            "       d.duty_status "
+            "SELECT o.officer_id, p.full_name, o.current_rank, o.status, "
+            "       COUNT(c.case_id) AS active_cases, "
+            "       EXISTS (SELECT 1 FROM duty_roster d "
+            "               WHERE d.officer_id = o.officer_id "
+            "                 AND d.duty_status = 'ON_DUTY') AS on_duty "
             "FROM officers o "
+            "JOIN persons p ON p.cnic = o.cnic "
             "LEFT JOIN case_officers co "
-            "       ON co.officer_id = o.officer_id "
-            "       AND co.removed_at IS NULL "
-            "LEFT JOIN duty_roster d "
-            "       ON d.officer_id = o.officer_id "
-            "       AND d.duty_status = 'ON_DUTY' "
+            "       ON co.officer_id = o.officer_id AND co.relieved_at IS NULL "
+            "LEFT JOIN cases c "
+            "       ON c.case_id = co.case_id AND c.case_status <> 'CLOSED' "
             "WHERE o.status = 'ACTIVE' "
-            "GROUP BY o.officer_id, o.name, o.rank, o.status, d.duty_status "
-            "ORDER BY active_cases DESC "
+            "GROUP BY o.officer_id, p.full_name, o.current_rank, o.status "
+            "ORDER BY active_cases DESC, o.officer_id "
             "LIMIT " +
             limit + ";";
 
@@ -877,7 +848,7 @@ namespace ipc
 
         const std::vector<std::string> cols = {
             "officer_id", "name", "rank", "status",
-            "active_cases", "duty_status"};
+            "active_cases", "on_duty"};
 
         std::ostringstream oss;
         oss << "{\"officers\":" << rowsToJsonArray(cols, rows) << '}';
