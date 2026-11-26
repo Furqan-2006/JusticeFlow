@@ -12,6 +12,7 @@ Usage:
     python3 generate_data.py --clear      # wipe then generate
 """
 
+import os
 import sys
 import random
 import traceback
@@ -33,11 +34,11 @@ Faker.seed(SEED)
 #  DATABASE CONFIG  — update password before running
 # ══════════════════════════════════════════════════════════════
 DB_CONFIG = {
-    'host':     'localhost',
-    'port':     5432,
-    'dbname':   'justiceflow',
-    'user':     'postgres',
-    'password': '123'    # ← change this
+    'host':     os.environ.get('PGHOST', 'localhost'),
+    'port':     int(os.environ.get('PGPORT', '5432')),
+    'dbname':   os.environ.get('PGDATABASE', 'justiceflow'),
+    'user':     os.environ.get('PGUSER', 'postgres'),
+    'password': os.environ.get('PGPASSWORD', '123')    # set PGPASSWORD; default is for local dev only
 }
 
 # ── Volume config ─────────────────────────────────────────────
@@ -437,7 +438,7 @@ def gen_officers(cur, persons: list, stations: list) -> list:
             (cnic, belt_number, joining_rank, current_rank, bps_scale,
              joining_date, station_id, status, qualification, retirement_date, password_hash, last_login)
         VALUES (%s,%s,%s::officer_rank_enum,%s::officer_rank_enum,
-                %s,%s,%s,%s::officer_status_enum,%s,%s,%s,%s)
+                %s,%s,%s,%s::officer_status_enum,%s,%s,crypt('justice123', gen_salt('bf')),NULL)
         RETURNING officer_id, cnic, current_rank, station_id, status
     """
     rank_pool  = random.choices(OFFICER_RANKS, weights=RANK_W, k=N_OFFICERS)

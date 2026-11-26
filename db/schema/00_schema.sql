@@ -4,3 +4,5 @@ CREATE SCHEMA IF NOT EXISTS public;
 CREATE SCHEMA IF NOT EXISTS audit;
 -- AI agents prediction output
 CREATE SCHEMA IF NOT EXISTS analytics;
+-- password hashing (auth_manager verifies with crypt())
+CREATE EXTENSION IF NOT EXISTS pgcrypto;

@@ -1,5 +1,13 @@
-CREATE ROLE justice_app WITH LOGIN PASSWORD 'justice_app';
-CREATE ROLE justice_ai  WITH LOGIN PASSWORD 'justice_ai';
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'justice_app') THEN
+        CREATE ROLE justice_app WITH LOGIN PASSWORD 'justice_app';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'justice_ai') THEN
+        CREATE ROLE justice_ai WITH LOGIN PASSWORD 'justice_ai';
+    END IF;
+END
+$$;
 -- Only audit triggers can write to audit schema
 -- No application user can INSERT/UPDATE/DELETE directly
 REVOKE ALL ON SCHEMA audit FROM PUBLIC;
