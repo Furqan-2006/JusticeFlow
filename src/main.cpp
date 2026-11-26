@@ -6,6 +6,7 @@
 #include "common/logger.h"
 #include "common/constants.h"
 #include "os_layer/ipc/include/ipc_manager.h"
+#include "os_layer/scheduler/include/scheduler_runner.h"
 
 #include <iostream>
 #include <cstring>
@@ -133,6 +134,13 @@ public:
             Logger::info(std::string(("✓ API Gateway listening on " + api_cfg.socket_path)).c_str());
 
             // ================================================================
+            // PHASE 2b: Background work — warrant expiry and the AI agents
+            // ================================================================
+            m_scheduler = std::make_unique<SchedulerRunner>();
+            m_scheduler->start();
+            Logger::info("✓ Scheduler started");
+
+            // ================================================================
             // PHASE 3: CLI is ready (but not started yet)
             // ================================================================
             Logger::info("Phase 3: CLI interface ready");
@@ -213,6 +221,13 @@ public:
 
         Logger::info("Initiating graceful shutdown...");
 
+        // Stop background jobs first: they use the database and shared memory
+        if (m_scheduler)
+        {
+            m_scheduler->stop();
+            m_scheduler.reset();
+        }
+
         // Shutdown API Gateway
         if (m_api_gateway)
         {
@@ -239,6 +254,7 @@ public:
 private:
     JusticeFlow::DBConfig m_db_config;
     std::unique_ptr<api_gateway::ApiGateway> m_api_gateway;
+    std::unique_ptr<SchedulerRunner> m_scheduler;
     bool m_initialized = false;
 };
 

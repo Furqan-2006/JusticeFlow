@@ -107,8 +107,9 @@ justiceflow/
 │   │   └── README.md
 │   │
 │   ├── ai_agents/
-│   │   ├── hotspot_agent.py        # Crime Hotspot Analyzer (ML model)
-│   │   ├── priority_agent.py       # Case Priority Recommender (ML model)
+│   │   ├── ha.py                   # Crime Hotspot Analyzer (the agent the daemon runs)
+│   │   ├── pa.py                   # Case Priority Recommender (the agent the daemon runs)
+│   │   ├── hotspot_agent.py, priority_agent.py  # old stubs, superseded by ha.py / pa.py
 │   │   └── workload.py             # Officer Workload Balancer (ML model)
 │   │
 │   ├── common/                     # Shared C++ contracts
@@ -133,7 +134,7 @@ justiceflow/
 │   │   │       ├── daemon.cpp          # double-fork + setsid
 │   │   │       ├── timer.cpp           # SIGALRM + setitimer
 │   │   │       ├── job_executor.cpp    # runs DB + AI jobs
-│   │   │       ├── process_spawner.cpp # fork + exec agents
+│   │   │       ├── process_spawner.cpp # spawn agents, reap them, record status
 │   │   │       └── signal_handler.cpp  # SIGCHLD, SIGALRM
 │   │   │
 │   │   ├── ipc/                    # Abdullah — data plane
@@ -348,6 +349,18 @@ python3 run.py
 
 The dashboard will be available at `http://localhost:5000`.
 
+### Background jobs
+
+While it runs, the daemon expires warrants whose `valid_until` date has passed (every 30 s) and runs the three AI agents (hotspot, priority, workload) every 5 minutes, the first run a few seconds after start. The agents connect as the `justice_ai` role, so give the daemon its password and the agent location:
+
+```bash
+export JF_AI_DB_PASS=<justice_ai password>
+export JF_AGENT_SCRIPT_DIR=$PWD/src/ai_agents   # default: src/ai_agents relative to where you start it
+# optional: JF_AGENT_INTERVAL_S (300), JF_EXPIRE_INTERVAL_S (30), JF_AI_DB_HOST / JF_AI_DB_NAME / JF_AI_DB_USER
+```
+
+An agent's status on the AI Agents page is 0 for a successful last run; otherwise it is the agent's exit code (124 means it timed out) with the reason beside it.
+
 Sign in with an officer's CNIC and password (the seeded officers all use `justice123`; run `make db-reset` to reseed). The daemon verifies the credentials, issues a session token, and checks it on every data request. Set `JF_DASHBOARD_SECRET` to keep dashboard logins across restarts. After five wrong passwords a CNIC is locked for five minutes.
 
 ---
@@ -370,8 +383,8 @@ Sign in with an officer's CNIC and password (the seeded officers all use `justic
 - UML class, sequence, and component diagrams in `docs/`
 
 ### Artificial Intelligence
-- **Crime Hotspot Analyzer** (`hotspot_agent.py`) — Geospatial crime cluster detection
-- **Case Priority Recommender** (`priority_agent.py`) — ML-based case urgency scoring
+- **Crime Hotspot Analyzer** (`ha.py`) — Geospatial crime cluster detection (DBSCAN)
+- **Case Priority Recommender** (`pa.py`) — Case urgency scoring
 - **Officer Workload Balancer** (`workload.py`) — Assignment optimization via DB repository and IPC reporting
 
 ### Operating Systems
