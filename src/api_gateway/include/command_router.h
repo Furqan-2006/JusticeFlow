@@ -1,14 +1,22 @@
 #pragma once
 /**
  * @file command_router.h
- * @brief Placeholder for future command dispatch.
+ * @brief Gateway commands that go beyond the read-only catalogue.
  *
- * In Option A, the dashboard is served by ipc::DomainSocket which already
- * contains its own dispatch() for the read-only dashboard catalogue.
- *
- * This file exists as part of the api_gateway module structure so future work
- * can move/centralize routing here without changing include paths.
+ * Installed on the DomainSocket as its extension handler. It
+ *   - serves LOGIN, LOGOUT and WHOAMI;
+ *   - rejects data reads (cases, analytics, workload) that carry no valid
+ *     session token, so nothing sensitive is served anonymously;
+ *   - leaves PING and the system-status commands open, and lets everything
+ *     it does not own fall through to the built-in handlers.
  */
+
+#include <map>
+#include <mutex>
+#include <string>
+
+#include "auth_validator.h"
+#include "os_layer/ipc/include/socket_request.h"
 
 namespace api_gateway
 {
@@ -20,5 +28,28 @@ namespace api_gateway
 
         CommandRouter(const CommandRouter &) = delete;
         CommandRouter &operator=(const CommandRouter &) = delete;
+
+        /// Extension-handler entry point: true = `out` holds the answer.
+        bool handle(const ipc::SocketRequest &req, ipc::SocketResponse &out);
+
+    private:
+        ipc::SocketResponse login(const ipc::SocketRequest &req);
+        ipc::SocketResponse logout(const ipc::SocketRequest &req);
+        ipc::SocketResponse whoami(const ipc::SocketRequest &req);
+
+        bool isLockedOut(const std::string &cnic);
+        void recordFailure(const std::string &cnic);
+        void clearFailures(const std::string &cnic);
+
+        AuthValidator validator_;
+
+        struct Attempts
+        {
+            int failures{0};
+            long window_start{0};
+            long locked_until{0};
+        };
+        std::mutex attempts_mutex_;
+        std::map<std::string, Attempts> attempts_;
     };
 } // namespace api_gateway

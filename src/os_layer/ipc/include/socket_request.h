@@ -111,6 +111,11 @@ namespace ipc
         uint32_t request_id{0};
         CommandType command{CommandType::UNKNOWN};
 
+        /// The command string exactly as received. Lets an extension handler
+        /// (see DomainSocket::setExtensionHandler) serve commands that are not
+        /// part of the read-only CommandType catalogue, e.g. LOGIN.
+        std::string command_name;
+
         /// Optional key→value parameters; all values arrive as strings.
         /// Numeric params (e.g. "limit", "index") must be validated by dispatch.
         std::unordered_map<std::string, std::string> params;

@@ -479,8 +479,21 @@ namespace ipc
     //  dispatch()  — routes request to the correct handler
     // ────────────────────────────────────────────────────────────────────────────
 
+    void DomainSocket::setExtensionHandler(ExtensionHandler handler)
+    {
+        extension_ = std::move(handler);
+    }
+
     SocketResponse DomainSocket::dispatch(const SocketRequest &req)
     {
+        if (extension_)
+        {
+            SocketResponse answer;
+            answer.request_id = req.request_id;
+            if (extension_(req, answer))
+                return answer;
+        }
+
         switch (req.command)
         {
         case CommandType::PING:

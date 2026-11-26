@@ -1,12 +1,18 @@
 """JusticeFlow dashboard.
 
-A read-only Flask UI. Every piece of data comes from the C++ daemon through
-the API gateway (client/gateway.py); this module never touches PostgreSQL.
+A Flask UI. Every piece of data comes from the C++ daemon through the API
+gateway (client/gateway.py); this module never touches PostgreSQL.
+
+Officers sign in with CNIC and password. The daemon checks them and issues a
+session token, which is kept in a signed, HttpOnly cookie and sent with every
+gateway call, so the daemon always knows which officer is acting.
 """
 import os
 from datetime import datetime
+from urllib.parse import urlparse
 
-from flask import Flask, abort, jsonify, render_template, request
+from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
+                   request, session, url_for)
 
 from client import gateway
 
@@ -16,12 +22,50 @@ PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 def create_app():
     app = Flask(__name__)
+    # Signs the session cookie. Set JF_DASHBOARD_SECRET to keep logins across
+    # restarts; without it a random key is made per start (everyone signs in again).
+    app.secret_key = os.environ.get("JF_DASHBOARD_SECRET") or os.urandom(32)
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                      SESSION_COOKIE_NAME="jf_session")
+    PUBLIC_ENDPOINTS = {"login", "healthz", "static"}
+    AUTH_FAILURES = (1, 3)  # AUTH_FAILED, SESSION_EXPIRED
 
     # ---- helpers -----------------------------------------------------------
 
+    def call(command, params=None):
+        """Gateway call carrying the signed-in officer's token. A rejected token
+        means the session ended, so remember that and send them to the login."""
+        result = gateway.call(command, params, token=session.get("token"))
+        if result["status"] in AUTH_FAILURES and command not in ("LOGIN", "LOGOUT"):
+            g.session_lost = True
+        return result
+
+    @app.before_request
+    def require_login():
+        if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint is None:
+            return None
+        if not session.get("token"):
+            if request.path.startswith("/api/"):
+                return jsonify({"status": "error", "message": "login required"}), 401
+            return redirect(url_for("login", next=request.full_path.rstrip("?")))
+        return None
+
+    @app.after_request
+    def drop_dead_session(response):
+        if getattr(g, "session_lost", False):
+            session.clear()
+            if not request.path.startswith("/api/"):
+                flash("Your session has ended. Please sign in again.")
+                return redirect(url_for("login"))
+        return response
+
+    @app.context_processor
+    def inject_officer():
+        return {"officer": session.get("officer")}
+
     def fetch(command, params=None, errors=None, key=None, default=None):
         """Call the gateway; on failure record the reason and return `default`."""
-        result = gateway.call(command, params)
+        result = call(command, params)
         if not result["ok"]:
             if errors is not None:
                 errors.append(f"{command}: {result['message']}")
@@ -66,6 +110,35 @@ def create_app():
     def pretty(value):
         return str(value or "—").replace("_", " ").title()
 
+    # ---- sign in / out ---------------------------------------------------------
+
+    def safe_next(target):
+        """Only follow redirects that stay on this site."""
+        if target and not urlparse(target).netloc and target.startswith("/") and not target.startswith("//"):
+            return target
+        return url_for("dashboard")
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        error = None
+        if request.method == "POST":
+            result = gateway.call("LOGIN", {"cnic": request.form.get("cnic", "").strip(),
+                                            "password": request.form.get("password", "")})
+            if result["ok"]:
+                data = result["data"]
+                session.clear()
+                session["token"] = data["token"]
+                session["officer"] = {k: data.get(k) for k in ("name", "belt_number", "rank")}
+                return redirect(safe_next(request.args.get("next")))
+            error = result["message"] if result["status"] in (-1, 12) else "Invalid CNIC or password."
+        return render_template("login.html", error=error), (401 if error else 200)
+
+    @app.route("/logout", methods=["POST"])
+    def logout():
+        gateway.call("LOGOUT", token=session.get("token"))
+        session.clear()
+        return redirect(url_for("login"))
+
     # ---- pages ---------------------------------------------------------------
 
     @app.route("/")
@@ -96,8 +169,8 @@ def create_app():
 
     @app.route("/cases/<int:case_id>")
     def case_detail(case_id):
-        result = gateway.call("GET_CASE_BY_ID", {"case_id": case_id})
-        if not result["ok"] and result["status"] != -1:
+        result = call("GET_CASE_BY_ID", {"case_id": case_id})
+        if not result["ok"] and result["status"] not in (-1, *AUTH_FAILURES):
             abort(404)  # gateway answered: no such case
         errors = [] if result["ok"] else [result["message"]]
         return render_template("case_detail.html", errors=errors, case=result["data"])

@@ -284,7 +284,10 @@ namespace ipc
 
             // command (required; UNKNOWN is accepted — dispatcher will reject it)
             if (top.count("command"))
-                out.command = toCommandType(top.at("command"));
+            {
+                out.command_name = top.at("command");
+                out.command = toCommandType(out.command_name);
+            }
             else
                 out.command = CommandType::UNKNOWN;
 
