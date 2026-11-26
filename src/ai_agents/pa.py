@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import json
 import psycopg2
 import numpy as np
@@ -52,7 +53,7 @@ def run_priority():
 
     conn = get_db_connection()
     if not conn:
-        return
+        return False
 
     cur = None
     try:
@@ -169,6 +170,7 @@ def run_priority():
     except Exception as e:
         print(f"[AI: Priority] Execution Error: {e}")
         conn.rollback()
+        return False
     finally:
         try:
             if cur:
@@ -177,4 +179,5 @@ def run_priority():
             conn.close()
 
 if __name__ == "__main__":
-    run_priority()
+    # Exit non-zero on a real failure so the daemon can report it.
+    sys.exit(1 if run_priority() is False else 0)

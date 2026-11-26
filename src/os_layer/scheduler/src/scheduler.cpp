@@ -98,6 +98,15 @@ void Scheduler::tick()
         if (!job)
             continue;
 
+        try
+        {
+            job->onTick();
+        }
+        catch (...)
+        {
+            Logger::error("Scheduler: job onTick threw; continuing");
+        }
+
         if (current_tick >= job->next_fire_tick)
         {
             JusticeFlow::ResultCode rc = JusticeFlow::ResultCode::OK;

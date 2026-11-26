@@ -91,7 +91,7 @@ OBJECTS := $(ALL_CPP_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 # Build Rules
 # ============================================================================
 
-.PHONY: all build clean test install help debug release verify-deps init-db seed-db db-reset setup-db setup-python setup-ai setup-status setup-all full-setup
+.PHONY: all build clean test install help debug release verify-deps init-db seed-db db-reset setup-db setup-python setup-ai setup-status setup-all full-setup demo demo-stop smoke
 
 # Default target
 all: setup-all build
@@ -249,14 +249,25 @@ db-reset:
 	@PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" createdb "$(DB_NAME)"
 	@$(MAKE) --no-print-directory setup-db
 
+# Run the whole stack (database, daemon, dashboard) for a demo.
+demo:
+	@scripts/demo.sh start
+
+demo-stop:
+	@scripts/demo.sh stop
+
+# Walk the demo story against a running stack (see `make demo`).
+smoke:
+	@python3 tests/smoke_test.py
+
 setup-python:
 	@echo "[PY] Installing dependencies from requirements.txt"
 	@pip3 install -r requirements.txt
 
 setup-ai:
 	@echo "[PY] Verifying AI agent imports"
-	@python3 -c "import src.ai_agents.hotspot_agent; import src.ai_agents.priority_agent" || \
-		( echo "[PY] Failed to import required AI agents: hotspot_agent, priority_agent"; exit 1 )
+	@python3 -c "import src.ai_agents.ha; import src.ai_agents.pa" || \
+		( echo "[PY] Failed to import required AI agents: ha, pa"; exit 1 )
 	@workload_found=0; \
 	for module_name in src.ai_agents.workload src.ai_agents.workload_agent; do \
 		if python3 -c "import importlib; importlib.import_module('$$module_name')" >/dev/null 2>&1; then \

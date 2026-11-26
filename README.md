@@ -107,8 +107,8 @@ justiceflow/
 │   │   └── README.md
 │   │
 │   ├── ai_agents/
-│   │   ├── hotspot_agent.py        # Crime Hotspot Analyzer (ML model)
-│   │   ├── priority_agent.py       # Case Priority Recommender (ML model)
+│   │   ├── ha.py                   # Crime Hotspot Analyzer
+│   │   ├── pa.py                   # Case Priority Recommender
 │   │   └── workload.py             # Officer Workload Balancer (ML model)
 │   │
 │   ├── common/                     # Shared C++ contracts
@@ -133,7 +133,7 @@ justiceflow/
 │   │   │       ├── daemon.cpp          # double-fork + setsid
 │   │   │       ├── timer.cpp           # SIGALRM + setitimer
 │   │   │       ├── job_executor.cpp    # runs DB + AI jobs
-│   │   │       ├── process_spawner.cpp # fork + exec agents
+│   │   │       ├── process_spawner.cpp # spawn agents, reap them, record status
 │   │   │       └── signal_handler.cpp  # SIGCHLD, SIGALRM
 │   │   │
 │   │   ├── ipc/                    # Abdullah — data plane
@@ -294,59 +294,61 @@ git clone https://github.com/Furqan-2006/JusticeFlow.git
 cd JusticeFlow
 ```
 
-### 2. Run the Setup Script
+### 2. Run the demo
+
+You need PostgreSQL, a C++17 toolchain with libpq headers, Python 3 and `make`. Install the Python packages once, then point the scripts at a PostgreSQL account that can create databases:
 
 ```bash
-chmod +x justiceflow_setup.sh
-./justiceflow_setup.sh
+make setup-python                       # agents' dependencies (numpy, scikit-learn, psycopg2, ...)
+pip install -r dashboard/requirements.txt
+
+export PGHOST=localhost PGUSER=postgres PGPASSWORD=<admin password>
+make demo                               # reset DB, build, start daemon + dashboard
+make smoke                              # walk the demo story and check every step
+make demo-stop
 ```
 
-### 3. Initialize the Database
+`make demo` creates the database from `db/schema/`, seeds about 22,000 synthetic rows (150 officers, all with the password `justice123`), builds the daemon, and starts it and the dashboard at `http://localhost:5000`. It prints a CNIC to sign in with. The daemon and agents use the development passwords of the roles the schema creates; set `JF_DB_PASS` and `JF_AI_DB_PASS` to override them.
+
+### 3. The demo story
+
+Sign in as an Inspector, then:
+
+1. **Register an FIR** from the Cases page. It gets a generated FIR number.
+2. **Attach evidence** on the case page. It gets an evidence number.
+3. **Issue a warrant** on the same page (Inspector rank or above).
+4. **Warrant expiry:** the daemon expires warrants whose `valid_until` date has passed. Dates are whole days, so to see this live, move one back as the database admin, for example `UPDATE warrants SET issue_date = CURRENT_DATE - 3, valid_until = CURRENT_DATE - 1 WHERE warrant_number = '...'`. Within 5 seconds (the interval `make demo` sets) it shows as Expired.
+5. **AI agents:** the AI Analytics, Workload and AI Agents pages fill in a few seconds after start as the agents run.
+6. **Audit trail:** every change is recorded in `audit.audit_log` with the officer's id and belt number, and the application role cannot alter or delete those rows.
+
+### 4. Running the pieces by hand
 
 ```bash
-psql -U postgres -d justiceflow -f db/00_schema.sql
-psql -U postgres -d justiceflow -f db/01_types.sql
-psql -U postgres -d justiceflow -f db/02_tables.sql
-psql -U postgres -d justiceflow -f db/03_functions.sql
-psql -U postgres -d justiceflow -f db/04_triggers.sql
-psql -U postgres -d justiceflow -f db/05_indexes.sql
-psql -U postgres -d justiceflow -f db/06_permissions.sql
-```
+make db-reset                           # needs the PG* admin variables above
+make build
 
-Optionally seed with synthetic data:
-
-```bash
-python3 db/generate_data.py
-```
-
-### 4. Build the C++ Backend
-
-```bash
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-```
-
-### 5. Install Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 6. Start the System
-
-```bash
-# Start the C++ backend daemon first (headless: serves the gateway until SIGTERM/SIGINT)
+# daemon (headless: serves the gateway until SIGTERM/SIGINT)
 export JF_DB_HOST=127.0.0.1 JF_DB_USER=justice_app JF_DB_PASS=<justice_app password>
+export JF_AI_DB_PASS=<justice_ai password>
 ./build/justiceflow --headless --pid-file /tmp/justiceflow.pid
 
-# Then start the Flask dashboard
-cd dashboard
-pip install -r requirements.txt
-python3 run.py
+# dashboard
+cd dashboard && python3 run.py
 ```
 
-The dashboard will be available at `http://localhost:5000`.
+Sign in with an officer's CNIC and password (the seeded officers all use `justice123`). The daemon verifies the credentials, issues a session token, and checks it on every data request. Set `JF_DASHBOARD_SECRET` to keep dashboard logins across restarts. After five wrong passwords a CNIC is locked for five minutes.
+
+### Background jobs
+
+While it runs, the daemon expires warrants whose `valid_until` date has passed (every 30 s) and runs the three AI agents (hotspot, priority, workload) every 5 minutes, the first run a few seconds after start. The agents connect as the `justice_ai` role, so give the daemon its password and the agent location:
+
+```bash
+export JF_AI_DB_PASS=<justice_ai password>
+export JF_AGENT_SCRIPT_DIR=$PWD/src/ai_agents   # default: src/ai_agents relative to where you start it
+# optional: JF_AGENT_INTERVAL_S (300), JF_EXPIRE_INTERVAL_S (30), JF_AI_DB_HOST / JF_AI_DB_NAME / JF_AI_DB_USER
+```
+
+An agent's status on the AI Agents page is 0 for a successful last run; otherwise it is the agent's exit code (124 means it timed out) with the reason beside it.
 
 Sign in with an officer's CNIC and password (the seeded officers all use `justice123`; run `make db-reset` to reseed). The daemon verifies the credentials, issues a session token, and checks it on every data request. Set `JF_DASHBOARD_SECRET` to keep dashboard logins across restarts. After five wrong passwords a CNIC is locked for five minutes.
 
@@ -370,8 +372,8 @@ Sign in with an officer's CNIC and password (the seeded officers all use `justic
 - UML class, sequence, and component diagrams in `docs/`
 
 ### Artificial Intelligence
-- **Crime Hotspot Analyzer** (`hotspot_agent.py`) — Geospatial crime cluster detection
-- **Case Priority Recommender** (`priority_agent.py`) — ML-based case urgency scoring
+- **Crime Hotspot Analyzer** (`ha.py`) — Geospatial crime cluster detection (DBSCAN)
+- **Case Priority Recommender** (`pa.py`) — Case urgency scoring
 - **Officer Workload Balancer** (`workload.py`) — Assignment optimization via DB repository and IPC reporting
 
 ### Operating Systems
@@ -386,17 +388,9 @@ Sign in with an officer's CNIC and password (the seeded officers all use `justic
 
 ## 🧪 Running Tests
 
-```bash
-cd build
-ctest --output-on-failure
-```
+`make smoke` (with the stack running, see above) is the end-to-end check: it signs in, registers an FIR, adds evidence, issues a warrant, waits for the daemon to expire it and for the agents to run, checks the audit trail and that the application role cannot change it, then confirms the dashboard shows the result.
 
-| Test Binary | Purpose |
-|-------------|---------|
-| `db_test` | DB connectivity smoke test through the OS layer |
-| `os_layer_integration_test` | Auth, threading, scheduler, and session primitives |
-| `os_smoke_test` | Auth and sync primitive smoke checks |
-| `superviser_test` | Supervisor loop and drain behavior |
+The C++ unit and integration binaries are built and listed with `make list-tests`; run one with, for example, `make db_test`.
 
 ---
 
@@ -405,7 +399,9 @@ ctest --output-on-failure
 - Database credentials must not be hardcoded. Use environment variables or a config file excluded via `.gitignore`.
 - `auth_manager` uses `mlock` to prevent sensitive memory from being paged to disk.
 - Session tokens are UUID-based, generated from OS randomness (`/dev/urandom`).
-- Token validation is enforced at the API Gateway level via `auth_validator` before any subsystem is reached.
+- Every data request and every write carries a session token, checked by the gateway's `CommandRouter` before anything runs. Writes execute as the signed-in officer, so the audit log names the person who acted.
+- Failed logins return one generic message and are throttled per CNIC.
+- The dashboard keeps the token in a signed, HttpOnly cookie and never opens a database connection.
 
 ---
 

@@ -118,7 +118,7 @@ TEST_F(CLITest, LogoutInvalidatesToken)
 TEST_F(CLITest, ListCasesByStation)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -132,7 +132,7 @@ TEST_F(CLITest, ListCasesByStation)
 TEST_F(CLITest, GetCaseById)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -156,7 +156,7 @@ TEST_F(CLITest, GetCaseById)
 TEST_F(CLITest, GetNonExistentCase)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -170,7 +170,7 @@ TEST_F(CLITest, GetNonExistentCase)
 TEST_F(CLITest, GetCasesByStatus)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database connection failed";
     }

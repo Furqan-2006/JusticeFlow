@@ -40,7 +40,7 @@ TEST_F(SystemIntegrationTest, LoginToLogoutFlow)
 TEST_F(SystemIntegrationTest, CaseLifecycle)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -88,7 +88,7 @@ TEST_F(SystemIntegrationTest, PartialInitRecovery)
 TEST_F(SystemIntegrationTest, CaseDataConsistency)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -112,7 +112,7 @@ TEST_F(SystemIntegrationTest, CaseDataConsistency)
 TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -125,7 +125,7 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
     std::thread t1([&]()
                    {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::MURDER, time(nullptr), "A", "A", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
@@ -133,7 +133,7 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
     std::thread t2([&]()
                    {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justiceflow123"))
+        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::ROBBERY, time(nullptr), "B", "B", 0, 0, 1, session.cnic.c_str());
         if (r.ok())

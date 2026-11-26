@@ -25,6 +25,11 @@ public:
     virtual ~Job() = default;
 
     virtual void execute() = 0;
+
+    /// Called on every tick (about once a second), whether or not the job is
+    /// due. Lets a job that started something in the background, such as an
+    /// agent process, notice when it has finished.
+    virtual void onTick() {}
 };
 
 // Concrete observer that updates SHM and wakes the ThreadPool
