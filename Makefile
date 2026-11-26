@@ -15,7 +15,7 @@ SRC_DIR         := src
 TEST_DIR        := tests
 INSTALL_PREFIX  := /usr/local
 DB_SCHEMA_DIR   := db/schema
-DB_SCHEMA_FILES := 00_schema.sql 01_types.sql 02_tables.sql 03_functions.sql 04_triggers.sql 05_indexes.sql 06_permissions.sql
+DB_SCHEMA_FILES := 00_schema.sql 01_types.sql 02_tables.sql 03_functions.sql 04_triggers.sql 05_indexes.sql 06_permissions.sql schema_patch.sql
 DB_HOST         ?= $(if $(PGHOST),$(PGHOST),localhost)
 DB_NAME         ?= $(if $(PGDATABASE),$(PGDATABASE),justiceflow)
 DB_USER         ?= $(if $(PGUSER),$(PGUSER),justiceflow)
@@ -91,7 +91,7 @@ OBJECTS := $(ALL_CPP_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 # Build Rules
 # ============================================================================
 
-.PHONY: all build clean test install help debug release verify-deps init-db seed-db setup-db setup-python setup-ai setup-status setup-all full-setup
+.PHONY: all build clean test install help debug release verify-deps init-db seed-db db-reset setup-db setup-python setup-ai setup-status setup-all full-setup
 
 # Default target
 all: setup-all build
@@ -240,6 +240,14 @@ seed-db:
 	fi
 
 setup-db: init-db seed-db
+
+# Drop and recreate the database, then load schema + seed data.
+# Needs a PostgreSQL user that may create databases (PGUSER, default: justiceflow).
+db-reset:
+	@echo "[DB] Resetting database $(DB_NAME) on $(DB_HOST)"
+	@PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" dropdb --if-exists "$(DB_NAME)"
+	@PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" createdb "$(DB_NAME)"
+	@$(MAKE) --no-print-directory setup-db
 
 setup-python:
 	@echo "[PY] Installing dependencies from requirements.txt"

@@ -56,7 +56,7 @@ CREATE TABLE Officers(
         )
     ),
     password_hash VARCHAR(255),
-    last_login TIMESTAMP;
+    last_login TIMESTAMP
 ) ;
 
 CREATE TABLE Cases (
