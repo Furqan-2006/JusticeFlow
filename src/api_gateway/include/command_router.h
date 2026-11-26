@@ -41,6 +41,8 @@ namespace api_gateway
         ipc::SocketResponse registerFir(const ipc::SocketRequest &req);
         ipc::SocketResponse addEvidence(const ipc::SocketRequest &req);
         ipc::SocketResponse caseEvidence(const ipc::SocketRequest &req);
+        ipc::SocketResponse issueWarrant(const ipc::SocketRequest &req);
+        ipc::SocketResponse caseWarrants(const ipc::SocketRequest &req);
 
         bool isLockedOut(const std::string &cnic);
         void recordFailure(const std::string &cnic);

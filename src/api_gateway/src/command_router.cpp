@@ -131,7 +131,7 @@ namespace api_gateway
             }
             if (e.sqlstate == "23503")
                 return SocketResponse::error(id, ResultCode::FOREIGN_KEY_VIOLATION,
-                                             "A referenced record does not exist (check the complainant CNIC)");
+                                             "A referenced record does not exist (check the CNIC you entered)");
             if (e.sqlstate == "23505")
                 return SocketResponse::error(id, ResultCode::ALREADY_EXISTS, "Record already exists");
             if (e.sqlstate.rfind("22", 0) == 0 || e.sqlstate.rfind("23", 0) == 0)
@@ -359,6 +359,98 @@ namespace api_gateway
         return SocketResponse::ok(req.request_id, oss.str());
     }
 
+    SocketResponse CommandRouter::issueWarrant(const SocketRequest &req)
+    {
+        JusticeFlow::SessionContext s;
+        const ResultCode rc = validator_.validate(req.param("token"), s);
+        if (rc != ResultCode::OK)
+            return SocketResponse::error(req.request_id,
+                                         rc == ResultCode::SESSION_EXPIRED ? rc : ResultCode::AUTH_FAILED,
+                                         "Authentication required");
+
+        // Mirrors the database rule: INSPECTOR or above (the enum is in seniority order).
+        if (static_cast<int>(s.rank) < static_cast<int>(JusticeFlow::OfficerRank::INSPECTOR))
+            return SocketResponse::error(req.request_id, ResultCode::RANK_INSUFFICIENT,
+                                         "Only Inspector rank or above may request a warrant");
+
+        const std::string type = req.param("warrant_type");
+        const std::string court = req.param("issuing_court");
+        const std::string magistrate = req.param("magistrate_name");
+        if (req.param("case_id").empty() || type.empty() || court.empty() || magistrate.empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT,
+                                         "case_id, warrant_type, issuing_court and magistrate_name are required");
+        if ((type == "SEARCH" || type == "SEIZURE") && req.param("target_address").empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT,
+                                         "target_address is required for SEARCH and SEIZURE warrants");
+        if (court.size() > 150 || magistrate.size() > 100 || tooLong(req.param("target_address")))
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT, "Text too long");
+
+        std::vector<std::vector<std::string>> rows;
+        ipc::DbError err;
+        // Issued today; valid_until defaults to 30 days and must fall after today.
+        const auto db = ipc::IpcManager::getInstance().executeAs(
+            s.officerId,
+            "INSERT INTO warrants (warrant_number, case_id, accused_cnic, warrant_type, issuing_court, "
+            "magistrate_name, issue_date, valid_until, target_address, requested_by) "
+            "SELECT '', c.case_id, NULLIF($2,''), $3::warrant_type_enum, $4, $5, CURRENT_DATE, "
+            "COALESCE(NULLIF($6,'')::date, CURRENT_DATE + 30), NULLIF($7,''), $8::bigint "
+            "FROM cases c WHERE c.case_id = $1::bigint AND c.station_id = $9::bigint "
+            "AND c.case_status <> 'CLOSED' "
+            "RETURNING warrant_id, warrant_number, warrant_status::text, valid_until::text",
+            {req.param("case_id"), req.param("accused_cnic"), type, court, magistrate,
+             req.param("valid_until"), req.param("target_address"),
+             std::to_string(s.officerId), std::to_string(s.stationId)},
+            rows, &err);
+        if (db != ResultCode::OK)
+            return writeFailure(req.request_id, err);
+        if (rows.empty())
+            return SocketResponse::error(req.request_id, ResultCode::NOT_FOUND,
+                                         "No open case with that id at your station");
+
+        Logger::info("[Gateway] Warrant issued");
+        std::ostringstream oss;
+        oss << "{\"warrant_id\":" << q(rows[0][0]) << ",\"warrant_number\":" << q(rows[0][1])
+            << ",\"status\":" << q(rows[0][2]) << ",\"valid_until\":" << q(rows[0][3]) << '}';
+        return SocketResponse::ok(req.request_id, oss.str());
+    }
+
+    SocketResponse CommandRouter::caseWarrants(const SocketRequest &req)
+    {
+        JusticeFlow::SessionContext s;
+        const ResultCode rc = validator_.validate(req.param("token"), s);
+        if (rc != ResultCode::OK)
+            return SocketResponse::error(req.request_id,
+                                         rc == ResultCode::SESSION_EXPIRED ? rc : ResultCode::AUTH_FAILED,
+                                         "Authentication required");
+        if (req.param("case_id").empty())
+            return SocketResponse::error(req.request_id, ResultCode::INVALID_INPUT, "case_id is required");
+
+        std::vector<std::vector<std::string>> rows;
+        ipc::DbError err;
+        if (ipc::IpcManager::getInstance().executeAs(
+                s.officerId,
+                "SELECT warrant_number, warrant_type::text, warrant_status::text, issuing_court, "
+                "magistrate_name, issue_date::text, valid_until::text, COALESCE(accused_cnic,''), "
+                "COALESCE(target_address,'') FROM warrants WHERE case_id = $1::bigint ORDER BY warrant_id",
+                {req.param("case_id")}, rows, &err) != ResultCode::OK)
+            return writeFailure(req.request_id, err);
+
+        static const char *keys[] = {"warrant_number", "warrant_type", "status", "issuing_court",
+                                     "magistrate_name", "issue_date", "valid_until", "accused_cnic",
+                                     "target_address"};
+        std::ostringstream oss;
+        oss << "{\"warrants\":[";
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            oss << (i ? "," : "") << '{';
+            for (size_t k = 0; k < 9; ++k)
+                oss << (k ? "," : "") << '"' << keys[k] << "\":" << q(rows[i][k]);
+            oss << '}';
+        }
+        oss << "]}";
+        return SocketResponse::ok(req.request_id, oss.str());
+    }
+
     bool CommandRouter::handle(const SocketRequest &req, SocketResponse &out)
     {
         if (req.command_name == "LOGIN")
@@ -379,6 +471,16 @@ namespace api_gateway
         if (req.command_name == "ADD_EVIDENCE")
         {
             out = addEvidence(req);
+            return true;
+        }
+        if (req.command_name == "ISSUE_WARRANT")
+        {
+            out = issueWarrant(req);
+            return true;
+        }
+        if (req.command_name == "GET_CASE_WARRANTS")
+        {
+            out = caseWarrants(req);
             return true;
         }
         if (req.command_name == "GET_CASE_EVIDENCE")
