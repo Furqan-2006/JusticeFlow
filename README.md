@@ -12,72 +12,146 @@ JusticeFlow is a full-stack, multi-disciplinary system for managing police cases
 |--------|------------|
 | **DBMS** | PostgreSQL schema with audit triggers, ACID transactions, stored procedures, and role-based permissions |
 | **SDA** | 5 applied design patterns (Strategy, Observer, Repository, Singleton, Template Method), full UML documentation |
-| **AI** | Crime hotspot detection, case priority recommendation, and officer workload optimization (ML models) |
+| **AI** | Crime hotspot detection (DBSCAN), case priority scoring (rules), and officer workload assignment (Hungarian algorithm) |
 | **OS** | Privilege daemon, IPC (Unix sockets, shared memory, FIFOs), thread pool, mmap, process synchronization |
 
 ---
 
 ## ✅ Current Status
 
-The system runs end to end. `make demo` starts it and `make smoke` proves it: an officer signs in, registers an FIR, attaches evidence and issues a warrant; the daemon expires the warrant when its date passes; the three AI agents refresh hotspots, case priorities and workload suggestions; every change lands in an audit log that names the officer and cannot be altered by the application. The dashboard shows all of it and talks only to the daemon.
+The demo path runs end to end. `./run_justiceflow.sh` starts it and `make smoke` checks it: an officer signs in, registers an FIR, attaches evidence and issues a warrant; the daemon expires the warrant when its date passes; the three AI agents refresh hotspots, case priorities and workload suggestions; every change lands in an audit log that names the officer and cannot be altered by the application. The dashboard shows all of it and talks only to the daemon.
 
-[`docs/END_TO_END_REPORT.md`](docs/END_TO_END_REPORT.md) lists what was broken, what was fixed, and what is still open.
+**Known gaps**
+
+- The daemon tries to record logins and logouts in a `sessions` table that the schema does not create. Sign-in still works because sessions are held in memory, and the daemon log shows `relation "sessions" does not exist`.
+- The Subsystem 1, 2 and 3 classes are not on the dashboard's request path (see [Subsystem design](#subsystem-design)).
+
+[`docs/END_TO_END_REPORT.md`](docs/END_TO_END_REPORT.md) records the earlier end-to-end work and what it left open. It is a snapshot: where it differs from this README (for example on log locations and unit tests), this README is current.
 
 ---
 
 ## 🏗️ Architecture
 
-```
-┌──────────────────────────────────────────────┐
-│          Flask Dashboard  (external UI)       │
-└───────────────────┬──────────────────────────┘
-                    │ Unix Domain Socket IPC
-                    │ Flask client ⇌ C++ listener
-┌───────────────────▼──────────────────────────┐
-│                 API Gateway                   │
-│   Listens on /tmp/justiceflow.sock            │
-│   Parses JSON commands · Routes to subsystems │
-└───────────────────┬──────────────────────────┘
-                    │
-┌───────────────────▼──────────────────────────────────────────────┐
-│                        C++ Application                            │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │           Shared Infrastructure Layer                       │  │
-│  │              Authentication & Session                       │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌──────────────────┐ ┌──────────────────┐ ┌─────────────────┐  │
-│  │   Subsystem 1    │ │   Subsystem 2    │ │   Subsystem 3   │  │
-│  │ Crime Intel &    │ │ Investigation &  │ │ Security &      │  │
-│  │ Resource Optim.  │ │ Case Processing  │ │ Enforcement     │  │
-│  │                  │ │                  │ │                 │  │
-│  │ Case Management  │ │ FIR Registration │ │ Arrest/Warrant  │  │
-│  │ Duty & Patrol    │ │ Evidence Mgmt    │ │ Forensic & Lab  │  │
-│  │ Officers & Staff │ │ Charge Sheet     │ │ Audit & Comply  │  │
-│  └────────┬─────────┘ └───────┬──────────┘ └───────┬─────────┘  │
-└───────────┼───────────────────┼─────────────────────┼────────────┘
-            │                   │ << Includes >>       │ << Includes >>
-    Read/Write        ┌─────────▼──────┐  ┌───────────▼────────┐
-┌───────────▼──────┐  │ Crime Hotspot  │  │  Case Priority     │
-│   PostgreSQL DB  │  │ Analyzer (ML)  │  │  Recommender (ML)  │
-│ public | audit   │  └────────────────┘  └────────────────────┘
-│ analytics        │            << Runs On / Spawns >>
-└──────────────────┘  ┌────────────────────────────────────────┐
-                      │           OS Layer (Linux)              │
-                      │  Scheduler | IPC | Threads | mmap      │
-                      └────────────────────────────────────────┘
-                             + Officer Workload Balancer (ML)
+### Running system
+
+```mermaid
+flowchart TB
+    browser(["Browser"])
+    dashboard["Flask dashboard<br/>dashboard/"]
+
+    subgraph daemon["C++ daemon: build/justiceflow --headless"]
+        gateway["Unix socket server<br/>one thread per client"]
+        router["CommandRouter<br/>login, token checks, writes"]
+        auth["AuthManager<br/>sessions held in memory"]
+        reads["Read handlers"]
+        sched["Scheduler thread<br/>1 s tick"]
+        shm[("Shared memory<br/>session count, agent status")]
+    end
+
+    subgraph agents["Python agents, role justice_ai"]
+        hot["ha.py<br/>hotspots: DBSCAN"]
+        pri["pa.py<br/>priority: rule scoring"]
+        work["workload_agent.py<br/>Hungarian assignment"]
+    end
+
+    db[("PostgreSQL<br/>public, audit, analytics")]
+
+    browser -->|HTTP| dashboard
+    dashboard -->|"length-prefixed JSON<br/>/tmp/justiceflow.sock"| gateway
+    gateway --> router
+    router --> auth
+    router -->|"reads, after the token check"| reads
+    auth -->|"verify password"| db
+    router -->|"writes as the signed-in officer"| db
+    reads -->|SELECT| db
+    sched -->|"expire warrants"| db
+    sched -->|"posix_spawn, waitpid"| agents
+    sched --> shm
+    router --> shm
+    reads --> shm
+    agents -->|"read public,<br/>insert into analytics"| db
 ```
 
-### How a request flows today
+The daemon connects to PostgreSQL as `justice_app`. The dashboard has no database connection. The socket is readable only by its owner, so the daemon and dashboard run as the same user.
 
-1. The dashboard sends one JSON frame over `/tmp/justiceflow.sock` and never touches the database.
-2. The gateway's `CommandRouter` handles `LOGIN`, `LOGOUT` and `WHOAMI`, and rejects any data read or write that does not carry a valid session token.
-3. Reads and writes run as parameterised SQL through the OS layer's database connection. A write runs in its own transaction as the signed-in officer, so the audit triggers record who acted.
-4. A scheduler thread inside the daemon expires warrants and starts the AI agents, which write their results to the `analytics` schema. The daemon records each agent's outcome in shared memory for the AI Agents page.
+### How a request flows
 
-The gateway commands implemented are: `PING`, `GET_ACTIVE_SESSIONS`, `GET_AGENT_STATUS`, `GET_CASE_LIST`, `GET_CASE_BY_ID`, `GET_HOTSPOT_DATA`, `GET_PRIORITY_CASES`, `GET_OFFICER_WORKLOAD`, `LOGIN`, `LOGOUT`, `WHOAMI`, `REGISTER_FIR`, `ADD_EVIDENCE`, `GET_CASE_EVIDENCE`, `ISSUE_WARRANT` and `GET_CASE_WARRANTS`. The Subsystem 1/2/3 classes under `src/system/` are not on this request path yet; see the report for what that means.
+```mermaid
+sequenceDiagram
+    actor Officer
+    participant D as Flask dashboard
+    participant G as Gateway (CommandRouter)
+    participant A as AuthManager
+    participant P as PostgreSQL
+
+    Officer->>D: CNIC and password
+    D->>G: LOGIN
+    G->>A: login
+    A->>P: check password hash (pgcrypto)
+    P-->>A: officer id, rank, station
+    A-->>G: session token
+    G-->>D: token
+    D-->>Officer: signed HttpOnly cookie
+
+    Officer->>D: Register FIR
+    D->>G: REGISTER_FIR with token
+    G->>A: validate token
+    alt token invalid or expired
+        G-->>D: Authentication required
+    else token valid
+        G->>P: BEGIN, set app.current_officer_id
+        G->>P: parameterised INSERT
+        Note over P: Triggers check rank rules,<br/>number the FIR, write the audit row
+        alt statement accepted
+            G->>P: COMMIT
+            G-->>D: FIR number
+        else statement rejected
+            G->>P: ROLLBACK
+            G-->>D: error
+        end
+    end
+```
+
+The gateway commands are: `PING`, `LOGIN`, `LOGOUT`, `WHOAMI`, `GET_ACTIVE_SESSIONS`, `GET_AGENT_STATUS`, `GET_AGENT_STATUS_BY_INDEX`, `GET_CASE_LIST`, `GET_CASE_BY_ID`, `GET_HOTSPOT_DATA`, `GET_PRIORITY_CASES`, `GET_OFFICER_WORKLOAD`, `REGISTER_FIR`, `ADD_EVIDENCE`, `GET_CASE_EVIDENCE`, `ISSUE_WARRANT` and `GET_CASE_WARRANTS`.
+
+### Subsystem design
+
+This is the modular design built for the SDA course. The interactive CLI (starting the binary without `--headless`) and the C++ tests use it. The gateway implements its commands directly and does **not** go through these subsystems.
+
+```mermaid
+flowchart TB
+    cli["Interactive CLI<br/>src/interface"]
+    tests["C++ tests<br/>tests/"]
+    facade["SystemManager facade<br/>src/system/system.h"]
+    auth["Shared infrastructure<br/>authentication and sessions"]
+
+    subgraph s1["Subsystem 1: crime intelligence and resources"]
+        s1a["Cases, evidence,<br/>officers, reports"]
+    end
+    subgraph s2["Subsystem 2: investigation and case processing"]
+        s2a["Cases, evidence,<br/>investigations, charge sheets"]
+    end
+    subgraph s3["Subsystem 3: security and enforcement"]
+        s3a["Warrants, arrests, bail"]
+        s3b["Forensics"]
+        s3c["Audit and compliance"]
+    end
+
+    os["OS layer<br/>src/os_layer"]
+    db[("PostgreSQL")]
+
+    cli --> facade
+    tests --> facade
+    facade --> auth
+    facade --> s1
+    facade --> s2
+    facade --> s3
+    auth --> os
+    facade --> db
+    os --> db
+```
+
+Some of these classes query tables or schemas that do not exist; the end-to-end report lists the details.
 
 ---
 
@@ -85,212 +159,38 @@ The gateway commands implemented are: `PING`, `GET_ACTIVE_SESSIONS`, `GET_AGENT_
 
 ```
 justiceflow/
-│
-├── dashboard/                      # Python Flask web interface (sign-in, cases, FIR/evidence/warrant forms, analytics)
-│   ├── app.py                      # Flask routes; every datum comes from the gateway
-│   ├── run.py                      # Entry point (127.0.0.1:5000; JF_DASHBOARD_HOST/PORT)
-│   ├── client/
-│   │   └── gateway.py              # Unix-socket client for /tmp/justiceflow.sock
-│   ├── templates/                  # base, login, dashboard, cases, new_case, case_detail,
-│   │                               # analytics, workload, ai_status, os_metrics
-│   ├── static/                     # css/styles.css, js/live_updates.js (5 s polling)
-│   ├── legacy/                     # old Streamlit prototype (direct DB, mock data); unused
-│   └── requirements.txt            # Flask only. The dashboard never opens a DB connection
-│
-├── db/                             # PostgreSQL database layer
-│   ├── schema/
-│   │   ├── 00_schema.sql           # Schemas (public, audit, analytics), extensions, roles
-│   │   ├── 01_types.sql            # Enum type catalog
-│   │   ├── 02_tables.sql           # Full relational schema
-│   │   ├── 03_functions.sql        # Stored procedures & validation functions
-│   │   ├── 04_triggers.sql         # Trigger wiring (audit, rank rules, number generators)
-│   │   ├── 05_indexes.sql          # Index strategy
-│   │   ├── 06_permissions.sql      # Role grants (application role cannot delete or alter audit rows)
-│   │   └── schema_patch.sql        # Fixes applied after the base schema
-│   └── data_generator/
-│       └── generate_data.py        # Synthetic data seeding (officers get password justice123)
-│
-├── scripts/
-│   └── demo.sh                     # Behind `make demo` / `make demo-stop`
-│
-├── docs/                           # UML and architecture diagrams, SDA deliverables,
-│                                   # END_TO_END_REPORT.md (what was fixed and what is open)
-│
-├── src/                            # C++ backend + AI agents
-│   │
-│   ├── api_gateway/                # Unix-socket gateway: auth, token checks, write commands
-│   │   ├── include/
-│   │   │   ├── api_gateway.h       # Starts the socket server
-│   │   │   ├── command_router.h    # LOGIN/LOGOUT/WHOAMI, token gate, write commands
-│   │   │   └── auth_validator.h    # Session-token check (calls shr_infra auth)
-│   │   ├── src/
-│   │   │   ├── api_gateway.cpp     # Installs the router on the socket
-│   │   │   ├── command_router.cpp  # Login throttling, FIR / evidence / warrant writes
-│   │   │   └── auth_validator.cpp  # Auth checks (calls shr_infra auth)
-│   │   └── README.md
-│   │
-│   ├── ai_agents/
-│   │   ├── ha.py                   # Crime Hotspot Analyzer
-│   │   ├── pa.py                   # Case Priority Recommender
-│   │   └── workload_agent.py       # Officer Workload Balancer (Hungarian assignment)
-│   │
-│   ├── common/                     # Shared C++ contracts
-│   │   ├── common.h                # Domain structs
-│   │   ├── constants.h             # Enums & result codes
-│   │   ├── dbconfig.h              # Env/file-driven DB config loader
-│   │   ├── ipc_types.h             # Shared IPC struct types
-│   │   └── logger.h                # Inline logger
-│   │
-│   ├── os_layer/                   # OS integration (C++)
-│   │   ├── scheduler/              # Furqan — control plane
-│   │   │   ├── include/
-│   │   │   │   ├── scheduler_module.h
-│   │   │   │   ├── scheduler.h
-│   │   │   │   ├── daemon.h
-│   │   │   │   ├── timer.h
-│   │   │   │   ├── job_executor.h
-│   │   │   │   ├── process_spawner.h
-│   │   │   │   ├── scheduler_runner.h  # 1 s ticker thread + the standing jobs
-│   │   │   │   └── signal_handler.h
-│   │   │   └── src/
-│   │   │       ├── scheduler.cpp
-│   │   │       ├── daemon.cpp          # double-fork + setsid
-│   │   │       ├── timer.cpp           # SIGALRM + setitimer (not used by the daemon; see scheduler_runner)
-│   │   │       ├── job_executor.cpp    # warrant expiry, DB health check
-│   │   │       ├── process_spawner.cpp # spawn agents, reap them, record status
-│   │   │       ├── scheduler_runner.cpp
-│   │   │       └── signal_handler.cpp  # SIGCHLD, SIGALRM (legacy path)
-│   │   │
-│   │   ├── ipc/                    # Abdullah — data plane
-│   │   │   ├── include/
-│   │   │   │   ├── ipc_module.h
-│   │   │   │   ├── ipc_manager.h
-│   │   │   │   ├── unix_socket.h
-│   │   │   │   ├── fifo.h
-│   │   │   │   ├── shared_memory.h
-│   │   │   │   ├── shm_layout.h        # shared struct layout
-│   │   │   │   ├── domain_socket.h     # Unix domain socket listener
-│   │   │   │   └── socket_request.h    # request/response types
-│   │   │   └── src/
-│   │   │       ├── ipc_manager.cpp
-│   │   │       ├── unix_socket.cpp
-│   │   │       ├── fifo.cpp            # mkfifo for agents
-│   │   │       ├── shared_memory.cpp   # shm_open + mmap
-│   │   │       ├── domain_socket.cpp
-│   │   │       └── socket_request.cpp
-│   │   │
-│   │   ├── threading/              # Abu Bakar — execution layer
-│   │   │   ├── include/
-│   │   │   │   ├── threading_module.h
-│   │   │   │   ├── thread_pool.h
-│   │   │   │   ├── worker.h
-│   │   │   │   ├── session_manager.h
-│   │   │   │   ├── connection_gate.h
-│   │   │   │   └── sync.h              # mutex, semaphore, condvar wrappers
-│   │   │   └── src/
-│   │   │       ├── thread_pool.cpp
-│   │   │       ├── worker.cpp
-│   │   │       ├── session_manager.cpp
-│   │   │       └── connection_gate.cpp # semaphore-based admission control
-│   │   │
-│   │   ├── memory/
-│   │   │   ├── include/
-│   │   │   │   ├── mmap_handler.h
-│   │   │   │   └── mlock_guard.h
-│   │   │   └── src/
-│   │   │       ├── mmap_handler.cpp
-│   │   │       └── mlock_guard.cpp
-│   │   │
-│   │   ├── process/
-│   │   │   ├── include/
-│   │   │   │   ├── process_manager.h
-│   │   │   │   └── process_registry.h
-│   │   │   └── src/
-│   │   │       ├── process_manager.cpp
-│   │   │       └── process_registry.cpp
-│   │   │
-│   │   ├── os_layer.h              # Top-level OS interface
-│   │   ├── README.md
-│   │   └── DESIGN.md               # Process topology, IPC diagram
-│   │
-│   ├── shr_infra/                  # Shared authentication & session layer
-│   │   └── auth/
-│   │       ├── include/
-│   │       │   ├── auth_manager.h
-│   │       │   ├── auth_module.h
-│   │       │   ├── session_store.h
-│   │       │   ├── duty_cache.h
-│   │       │   └── token_generator.h
-│   │       └── src/
-│   │           ├── auth_manager.cpp
-│   │           ├── session_store.cpp
-│   │           ├── duty_cache.cpp
-│   │           └── token_generator.cpp
-│   │
-│   ├── subsystem1/                 # Crime Intelligence & Resource Optimization
-│   │                               # Case Management · Duty & Patrol · Officers & Personnel
-│   │
-│   ├── subsystem2/                 # Investigation & Case Processing
-│   │   ├── CaseManager.h/cpp       # Case service — registration/fetch via IpcManager
-│   │   ├── EvidenceManager.h/cpp   # Evidence service + mmap support
-│   │   ├── InvestigationManager.h/cpp
-│   │   ├── Case.h/cpp              # Case entity with Strategy transition hooks
-│   │   ├── Evidence.h/cpp          # Evidence entity — Observer notifications
-│   │   ├── ChargeSheet.h/cpp       # Charge sheet submission and locking
-│   │   ├── ICaseStatusStrategy.h   # Strategy pattern interface
-│   │   └── IEvidenceObserver.h     # Observer pattern interface
-│   │
-│   └── subsystem3/                 # Security & Enforcement
-│       ├── audit/
-│       │   ├── include/
-│       │   │   ├── audit_manager.h     # Singleton entry point for audit queries
-│       │   │   └── audit_query.h       # Template Method pattern — query builder
-│       │   └── src/
-│       │       ├── audit_manager.cpp
-│       │       └── audit_query.cpp
-│       │
-│       ├── enforcement/
-│       │   ├── include/
-│       │   │   ├── warrant_manager.h   # Warrant state machine
-│       │   │   ├── arrest_manager.h    # Custody state machine
-│       │   │   └── bail_manager.h      # Bail state machine
-│       │   └── src/
-│       │       ├── warrant_manager.cpp
-│       │       ├── arrest_manager.cpp
-│       │       └── bail_manager.cpp
-│       │
-│       ├── forensic/
-│       │   ├── include/
-│       │   │   ├── forensic_manager.h      # Forensic state machine (6 operations)
-│       │   │   └── forensic_repository.h   # Repository pattern — pure DB access
-│       │   └── src/
-│       │       ├── forensic_manager.cpp
-│       │       └── forensic_repository.cpp
-│       │
-│       ├── sql/
-│       │   ├── audit_triggers.sql          # SECURITY DEFINER + immutability enforcement
-│       │   ├── enforcement_jobs.sql        # expire_warrants() + expire_bail_records()
-│       │   └── forensic_triggers.sql       # Evidence status sync triggers
-│       │
-│       ├── subsystem3.h                    # Public API
-│       └── subsystem3.cpp                  # Routing to managers
-│
-├── tests/
-│   ├── smoke_test.py               # End-to-end demo story (`make smoke`)
-│   ├── fixtures.sql                # Officer the C++ tests sign in as (test database only)
-│   ├── db_test.cpp
-│   ├── os_layer_integration_test.cpp
-│   ├── os_smoke_test.cpp
-│   └── superviser_test.cpp
-│
-├── .gitignore
-├── folder_structure.txt
-├── run_justiceflow.sh              # Set up, build and start everything
-├── install.sh                      # Install, build and test
-├── justiceflow_setup.sh            # Ubuntu system packages
+├── dashboard/               # Flask web interface; talks only to the daemon
+│   ├── app.py               # Routes
+│   ├── run.py               # Entry point (127.0.0.1:5000; JF_DASHBOARD_HOST/PORT)
+│   ├── client/gateway.py    # Unix-socket client
+│   ├── templates/  static/
+│   └── legacy/              # Old Streamlit prototype; unused
+├── db/
+│   ├── schema/              # 00-06 SQL files and schema_patch.sql
+│   └── data_generator/      # Synthetic data (officers get password justice123)
+├── src/
+│   ├── main.cpp             # Daemon and CLI entry point
+│   ├── api_gateway/         # Socket gateway: login, token checks, write commands
+│   ├── interface/           # Interactive CLI
+│   ├── common/              # Shared structs, constants, DB config, logger
+│   ├── ai_agents/           # ha.py, pa.py, workload_agent.py
+│   ├── os_layer/            # scheduler, ipc, threading, memory, process
+│   └── system/
+│       ├── system.h/.cpp    # SystemManager facade
+│       ├── shr_infra/auth/  # Authentication and sessions
+│       ├── subsystem1/
+│       ├── subsystem2/      # controllers, models, patterns
+│       └── subsystem3/      # audit, enforcement, forensic
+├── tests/                   # C++ tests, fixtures.sql, smoke_test.py
+├── scripts/                 # demo.sh (start/stop), common.sh (shared prompts)
+├── docs/                    # UML diagrams, proposals, reports
+├── logs/                    # Created at run time
+├── run_justiceflow.sh       # Set up, build and start everything
+├── install.sh               # Install, build and test
+├── justiceflow_setup.sh     # Ubuntu system packages
+├── run_ai_agents_standalone.sh
 ├── Makefile
-├── requirements.txt                # Python dependencies
-└── README.md
+└── requirements.txt
 ```
 
 ---
@@ -298,8 +198,8 @@ justiceflow/
 ## ⚙️ Prerequisites
 
 ### System
-- Ubuntu 22.04+ (or compatible Linux distribution)
-- GCC 11+ / Clang 14+ with C++17 support
+- Ubuntu 22.04+ (the scripts use `apt`)
+- A C++17 compiler (`g++`)
 - GNU Make
 - `libreadline-dev`, and `libgtest-dev` for the tests
 - PostgreSQL 14+
@@ -310,8 +210,7 @@ justiceflow/
 
 ### C++ Libraries
 - `libpq-dev` — PostgreSQL C client
-- `libpthread` — POSIX threads
-- `nlohmann/json` — JSON serialization
+- `libpthread` — POSIX threads (part of glibc)
 
 ---
 
@@ -372,7 +271,8 @@ export JF_DB_HOST=127.0.0.1 JF_DB_USER=justice_app JF_DB_PASS=<justice_app passw
 export JF_AI_DB_PASS=<justice_ai password>
 ./build/justiceflow --headless --pid-file /tmp/justiceflow.pid
 
-# dashboard
+# dashboard (in a second terminal, from the project folder)
+source .venv/bin/activate
 cd dashboard && python3 run.py
 ```
 
@@ -389,8 +289,6 @@ export JF_AGENT_SCRIPT_DIR=$PWD/src/ai_agents   # default: src/ai_agents relativ
 ```
 
 An agent's status on the AI Agents page is 0 for a successful last run; otherwise it is the agent's exit code (124 means it timed out) with the reason beside it.
-
-Sign in with an officer's CNIC and password (the seeded officers all use `justice123`; run `make db-reset` to reseed). The daemon verifies the credentials, issues a session token, and checks it on every data request. Set `JF_DASHBOARD_SECRET` to keep dashboard logins across restarts. After five wrong passwords a CNIC is locked for five minutes.
 
 ---
 
@@ -412,17 +310,20 @@ Sign in with an officer's CNIC and password (the seeded officers all use `justic
 - UML class, sequence, and component diagrams in `docs/`
 
 ### Artificial Intelligence
-- **Crime Hotspot Analyzer** (`ha.py`) — Geospatial crime cluster detection (DBSCAN)
-- **Case Priority Recommender** (`pa.py`) — Case urgency scoring
-- **Officer Workload Balancer** (`workload.py`) — Assignment optimization via DB repository and IPC reporting
+- **Crime Hotspot Analyzer** (`ha.py`) — geospatial crime cluster detection (DBSCAN)
+- **Case Priority Recommender** (`pa.py`) — rule-based case urgency scoring
+- **Officer Workload Balancer** (`workload_agent.py`) — assignment with the Hungarian algorithm
 
 ### Operating Systems
-- **Daemon** — Double-fork + `setsid` privilege daemon (`daemon.cpp`)
-- **Scheduler** — SIGALRM-driven tick loop with observer notifications
-- **IPC** — Unix domain sockets, named FIFOs, and `mmap`-backed shared memory
-- **Thread Pool** — Worker queue with semaphore-based admission control
-- **Process Management** — `waitpid`-driven lifecycle, registry, and fork/exec spawning
-- **Memory Safety** — `mlock` RAII guard and `mmap` handler for sensitive data
+
+Used by the running daemon:
+- **Scheduler** — a one-second ticker thread running warrant expiry and the agents
+- **IPC** — a Unix domain socket and an `mmap`-backed shared status table
+- **Process management** — agents started with `posix_spawn`, reaped with `waitpid`, killed on timeout
+- **Memory safety** — the password buffer is pinned with an `mlock` RAII guard during login
+
+Implemented but not started by the daemon:
+- Double-fork daemonisation (`daemon.cpp`), the SIGALRM timer, the thread pool and connection gate, named FIFOs
 
 ---
 
@@ -442,9 +343,9 @@ make auth_test                          # or one module; `make list-tests` shows
 
 ## 🔐 Security Notes
 
-- Database credentials must not be hardcoded. Use environment variables or a config file excluded via `.gitignore`.
+- Pass database credentials through environment variables. The schema does create `justice_app` and `justice_ai` with development passwords equal to their names; change them on anything but a throwaway machine.
 - `auth_manager` uses `mlock` to prevent sensitive memory from being paged to disk.
-- Session tokens are UUID-based, generated from OS randomness (`/dev/urandom`).
+- Session tokens are UUID-based, generated from OS randomness. Sessions are held in the daemon's memory and are lost when it restarts.
 - Every data request and every write carries a session token, checked by the gateway's `CommandRouter` before anything runs. Writes execute as the signed-in officer, so the audit log names the person who acted.
 - Failed logins return one generic message and are throttled per CNIC.
 - The dashboard keeps the token in a signed, HttpOnly cookie and never opens a database connection.
