@@ -1,6 +1,8 @@
 // tests/test_common.cpp
 #include "test_common.h"
 
+#include <unistd.h>
+
 namespace test_utils
 {
     namespace
@@ -12,57 +14,41 @@ namespace test_utils
         }
     }
 
-#include <set>
-
     JusticeFlow::Case createTestCase(PGconn *conn, int officer_id)
     {
-        // 1. Define the list of authorized officer IDs
-        static const std::set<int> authorized_officers = {
-            927, 929, 933, 936, 937, 947, 957, 967, 968, 969,
-            971, 978, 981, 986, 991, 994, 997, 998, 1001, 1002,
-            1009, 1015, 1018, 1022, 1023, 1025, 1026, 1033, 1036,
-            1037, 1041, 1042, 1044, 1045, 1055, 1063, 1064, 1066};
-
-        // 2. Validate the provided officer_id
-        // If the ID is not in the list, default to the first valid officer (927)
-        int final_officer_id;
-        if (authorized_officers.find(officer_id) != authorized_officers.end())
-        {
-            final_officer_id = officer_id;
-        }
-        else
-        {
-            // Log a warning here if necessary
-            final_officer_id = 937;
-        }
-
         JusticeFlow::Case test_case;
         const int suffix = next_suffix();
         test_case.case_id = 0; // will be updated from RETURNING on success; stays 0 if INSERT fails
-        test_case.fir_number = "FIR-TEST-" + std::to_string(suffix);
+        test_case.fir_number = "FIR-TEST-" + std::to_string(getpid() % 100000) + "-" + std::to_string(suffix);
         test_case.case_type = JusticeFlow::CaseType::MURDER;
         test_case.case_status = JusticeFlow::CaseStatus::REGISTERED;
         test_case.incident_date = time(nullptr);
         test_case.incident_address = "123 Test Street";
-        test_case.station_id = 460;
-        test_case.filed_by = final_officer_id; // Using validated ID
+        test_case.station_id = 0; // taken from the filing officer below
+        test_case.filed_by = officer_id;
         test_case.filed_at = time(nullptr);
 
         if (conn != nullptr && PQstatus(conn) == CONNECTION_OK)
         {
+            // Only ASI, SI and INSPECTOR may file an FIR: use the requested officer if
+            // eligible, otherwise the first officer who is.
             char query[1024];
             std::snprintf(
                 query, sizeof(query),
                 "INSERT INTO cases (fir_number, case_type, case_status, incident_date, incident_address, incident_description, "
                 "incident_lat, incident_lon, station_id, primary_complainant_cnic, filed_by, filed_at) "
-                "VALUES ('%s', 'MURDER', 'REGISTERED', NOW(), '123 Test Street', 'test', 0, 0, 460, ' 42501-1763627-0', %d, NOW()) "
-                "RETURNING case_id",
-                test_case.fir_number.c_str(), final_officer_id); // Using validated ID
+                "SELECT '%s', 'MURDER', 'REGISTERED', NOW(), '123 Test Street', 'test', 0, 0, station_id, cnic, officer_id, NOW() "
+                "FROM officers WHERE current_rank IN ('ASI', 'SI', 'INSPECTOR') "
+                "ORDER BY (officer_id = %d) DESC, officer_id LIMIT 1 "
+                "RETURNING case_id, station_id, filed_by",
+                test_case.fir_number.c_str(), officer_id);
 
             PGresult *res = PQexec(conn, query);
             if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
             {
                 test_case.case_id = std::atoi(PQgetvalue(res, 0, 0));
+                test_case.station_id = std::atoi(PQgetvalue(res, 0, 1));
+                test_case.filed_by = std::atoi(PQgetvalue(res, 0, 2));
             }
             PQclear(res);
         }

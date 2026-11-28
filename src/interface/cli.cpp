@@ -890,7 +890,8 @@ namespace cli_interface
     CommandResult CLIInterface::handleClearCommand(const std::vector<std::string> &args)
     {
         (void)args;
-        system("clear || cls"); // Works on Unix and Windows
+        // Nothing to do if the terminal cannot be cleared
+        (void)!system("clear || cls"); // Works on Unix and Windows
         return CommandResult::ok();
     }
 

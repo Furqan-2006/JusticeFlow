@@ -16,7 +16,7 @@ protected:
         JusticeFlowTestFixture::SetUp();
 
         // Setup database config for test
-        db_config.host = "/var/run/postgresql";
+        db_config.host = "127.0.0.1";
         db_config.dbname = "justiceflow_test";
         db_config.user = "justice_app";
         db_config.port = 5432;
@@ -43,7 +43,7 @@ TEST_F(CLITest, LoginWithValidCredentials)
 
     // This test requires a pre-existing user in the test database
     // In CI/CD, you'd seed this data
-    auto result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
+    auto result = sys.auth().login("90000-0000001-1", "JusticeDemo@2026");
 
     EXPECT_TRUE(result.ok());
     EXPECT_FALSE(result.value.empty());
@@ -53,7 +53,7 @@ TEST_F(CLITest, LoginWithEmptyCredentials)
 {
     auto &sys = system_layer::SystemManager::getInstance();
     EXPECT_FALSE(sys.auth().login("", "x").ok());
-    EXPECT_FALSE(sys.auth().login("42401-637951-0", "").ok());
+    EXPECT_FALSE(sys.auth().login("90000-0000001-1", "").ok());
     EXPECT_FALSE(sys.auth().login("", "").ok());
 }
 
@@ -69,7 +69,7 @@ TEST_F(CLITest, ValidateTokenAfterLogin)
 {
     auto &sys = system_layer::SystemManager::getInstance();
 
-    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
+    auto login_result = sys.auth().login("90000-0000001-1", "JusticeDemo@2026");
     if (!login_result.ok())
     {
         GTEST_SKIP() << "Login failed, cannot test token validation";
@@ -98,7 +98,7 @@ TEST_F(CLITest, LogoutInvalidatesToken)
 {
     auto &sys = system_layer::SystemManager::getInstance();
 
-    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
+    auto login_result = sys.auth().login("90000-0000001-1", "JusticeDemo@2026");
     if (!login_result.ok())
     {
         GTEST_SKIP() << "Login failed";
@@ -118,7 +118,7 @@ TEST_F(CLITest, LogoutInvalidatesToken)
 TEST_F(CLITest, ListCasesByStation)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -132,7 +132,7 @@ TEST_F(CLITest, ListCasesByStation)
 TEST_F(CLITest, GetCaseById)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -156,7 +156,7 @@ TEST_F(CLITest, GetCaseById)
 TEST_F(CLITest, GetNonExistentCase)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database connection failed";
     }
@@ -170,7 +170,7 @@ TEST_F(CLITest, GetNonExistentCase)
 TEST_F(CLITest, GetCasesByStatus)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database connection failed";
     }

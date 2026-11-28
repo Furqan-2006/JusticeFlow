@@ -70,7 +70,8 @@ TEST_F(OrchestratorTest, InitializesSystemLayer)
     auto &sys = system_layer::SystemManager::getInstance();
 
     system_layer::SystemInitConfig config;
-    config.audit_db_conninfo = "host=/var/run/postgresql dbname=justiceflow_test";
+    static const std::string audit_conninfo = testConninfo();
+        config.audit_db_conninfo = audit_conninfo.c_str();
 
     auto result = sys.init(config);
 
@@ -83,7 +84,8 @@ TEST_F(OrchestratorTest, ShutdownAfterInit)
     auto &sys = system_layer::SystemManager::getInstance();
 
     system_layer::SystemInitConfig config;
-    config.audit_db_conninfo = "host=/var/run/postgresql dbname=justiceflow_test";
+    static const std::string audit_conninfo = testConninfo();
+        config.audit_db_conninfo = audit_conninfo.c_str();
 
     auto init_result = sys.init(config);
     EXPECT_TRUE(init_result.ok());

@@ -36,7 +36,7 @@ Options:
   --release          Build with BUILD_MODE=release
   --skip-setup       Skip justiceflow_setup.sh
   --skip-tests       Skip make test
-  --seed-data        Enable database synthetic data generation
+  --seed-data        Fill a new application database with synthetic data
   --repo-url <url>   Clone from custom repository URL
   --help             Show this help message
 EOF
@@ -59,7 +59,7 @@ on_error() {
   print_error "Installation failed at line ${line_no}."
   echo -e "${YELLOW}Suggestions:${NC}"
   echo "  1) Re-run with --debug to see detailed output"
-  echo "  2) Verify PostgreSQL is running and credentials are correct"
+  echo "  2) Verify PostgreSQL is running: pg_isready"
   echo "  3) Try: make verify-deps"
   if [[ "$DEBUG_MODE" -eq 0 ]]; then
     print_warn "No rollback was performed automatically. You can run: make clean"
@@ -68,6 +68,8 @@ on_error() {
 }
 
 trap 'on_error $LINENO' ERR
+
+ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -118,6 +120,11 @@ else
 fi
 
 cd "$PROJECT_DIR"
+# shellcheck source=scripts/common.sh
+source "$PROJECT_DIR/scripts/common.sh"
+[[ "$EUID" -ne 0 ]] || die "run this as your normal user; it calls sudo itself"
+# Everything from here on is also saved to logs/install-<time>.log
+log_run install "$PROJECT_DIR/install.sh" ${ARGS[@]+"${ARGS[@]}"}
 
 if [[ "$SKIP_SETUP" -eq 0 ]]; then
   print_header "System Prerequisites"
@@ -128,12 +135,8 @@ if [[ "$SKIP_SETUP" -eq 0 ]]; then
   if [[ ! -x "./justiceflow_setup.sh" ]]; then
     chmod +x ./justiceflow_setup.sh
   fi
-  if [[ "$EUID" -eq 0 ]]; then
-    ./justiceflow_setup.sh
-  else
-    print_info "Running justiceflow_setup.sh with sudo for system package installation"
-    sudo ./justiceflow_setup.sh
-  fi
+  print_info "Running justiceflow_setup.sh with sudo for system package installation"
+  sudo ./justiceflow_setup.sh
 else
   print_warn "Skipping justiceflow_setup.sh (--skip-setup)"
 fi
@@ -141,18 +144,33 @@ fi
 print_header "Dependency Verification"
 make verify-deps
 
-print_header "Database + Python Setup"
-make setup-all SEED_DATA=0
-if [[ "$SEED_DATA" -eq 1 ]]; then
-  print_header "Synthetic Data Seeding"
-  make seed-db SEED_DATA=1
-fi
+print_header "Python Packages"
+make setup-python
+make setup-ai
 
 print_header "Build"
 make build BUILD_MODE="$BUILD_MODE"
 
+print_header "Database"
+start_postgres
+export PGDATABASE=justiceflow
+db_login
+tables=0
+if [[ "$(psql -d postgres -Atc "select 1 from pg_database where datname='justiceflow'")" == "1" ]]; then
+  tables="$(psql -Atc "select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema')")"
+fi
+if [[ "$tables" != "0" ]]; then
+  print_warn "Database 'justiceflow' already has tables; leaving it as it is"
+elif [[ "$SEED_DATA" -eq 1 ]]; then
+  make setup-db SEED_DATA=1
+else
+  make init-db
+fi
+
 if [[ "$SKIP_TESTS" -eq 0 ]]; then
   print_header "Tests"
+  print_info "Rebuilding the justiceflow_test database"
+  make test-db
   make test BUILD_MODE="$BUILD_MODE"
 else
   print_warn "Skipping tests (--skip-tests)"
@@ -168,7 +186,4 @@ fi
 
 print_header "Installation Complete"
 echo -e "${GREEN}${BOLD}JusticeFlow setup finished successfully.${NC}"
-echo "Next steps:"
-echo "  1) Configure database credentials (PGHOST/PGDATABASE/PGUSER as needed)"
-echo "  2) Run backend: ./$EXECUTABLE_PATH"
-echo "  3) Start dashboard (if needed): cd dashboard && python3 run.py"
+echo "Next step: ./run_justiceflow.sh   (starts the daemon and the dashboard)"

@@ -18,7 +18,7 @@ private:
     ~Logger()
     {
         pthread_mutex_lock(&mutex);
-        if (logFile)
+        if (logFile && logFile != stdout)
         {
             fclose(logFile);
             logFile = nullptr;
@@ -69,12 +69,13 @@ public:
         Logger &logger = getInstance();
 
         pthread_mutex_lock(&logger.mutex);
-        if (logger.logFile)
+        if (logger.logFile && logger.logFile != stdout)
         {
             fclose(logger.logFile);
         }
 
-        logger.logFile = fopen(filePath, "a");
+        // A null path means standard output.
+        logger.logFile = filePath ? fopen(filePath, "a") : stdout;
         bool success = (logger.logFile != nullptr);
 
         pthread_mutex_unlock(&logger.mutex);

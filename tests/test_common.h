@@ -6,6 +6,7 @@
 #include <memory>
 
 #include <iostream>
+#include <cstdlib>
 
 // Include main headers
 #include "../src/system/system.h"
@@ -15,6 +16,22 @@
 #include "../src/interface/cli.h"
 
 /**
+ * @brief Connection string for the test database (never the application one).
+ * Defaults match `make test-db`; JF_DB_HOST / JF_DB_NAME / JF_DB_PASS override.
+ */
+inline std::string testConninfo()
+{
+    auto env = [](const char *name, const char *fallback)
+    {
+        const char *v = std::getenv(name);
+        return std::string(v && *v ? v : fallback);
+    };
+    return "host=" + env("JF_DB_HOST", "127.0.0.1") +
+           " dbname=" + env("JF_DB_NAME", "justiceflow_test") +
+           " user=justice_app password=" + env("JF_DB_PASS", "justice_app");
+}
+
+/**
  * @brief Base fixture for all JusticeFlow tests
  */
 class JusticeFlowTestFixture : public ::testing::Test
@@ -22,10 +39,6 @@ class JusticeFlowTestFixture : public ::testing::Test
 protected:
     void SetUp() override
     {
-        setenv("JF_TEST_AUTH_FALLBACK",
-               "42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123",
-               1);
-
         auto &sys = system_layer::SystemManager::getInstance();
 
         // ✅ Skip if already initialized
@@ -35,7 +48,8 @@ protected:
         }
 
         system_layer::SystemInitConfig config;
-        config.audit_db_conninfo = "host=/var/run/postgresql dbname=justiceflow_test";
+        static const std::string audit_conninfo = testConninfo();
+        config.audit_db_conninfo = audit_conninfo.c_str();
 
         auto result = sys.init(config);
 

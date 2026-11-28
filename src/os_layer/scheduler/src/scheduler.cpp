@@ -34,9 +34,10 @@ void StatusTableUpdater::onJobComplete(Job *job, JusticeFlow::ResultCode result)
     {
         AgentStatus st;
         std::memset(&st, 0, sizeof(st));
-        std::strncpy(st.agent_name, msg.agent_name, sizeof(st.agent_name) - 1);
+        // st is zeroed, so copying at most size - 1 bytes leaves it terminated
+        std::memcpy(st.agent_name, msg.agent_name, strnlen(msg.agent_name, sizeof(st.agent_name) - 1));
         st.current_status = msg.status_code;
-        std::strncpy(st.error_detail, msg.error_detail, sizeof(st.error_detail) - 1);
+        std::memcpy(st.error_detail, msg.error_detail, strnlen(msg.error_detail, sizeof(st.error_detail) - 1));
         st.last_updated = msg.timestamp;
 
         ipc::IpcManager::getInstance().updateAgentStatus(agent_idx, st);

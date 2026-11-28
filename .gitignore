@@ -20,6 +20,7 @@ __pycache__/
 
 /tests/build/
 .venv-ai-agents/
+.venv/
 build/
 .env
 .env.*

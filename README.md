@@ -277,6 +277,7 @@ justiceflow/
 │
 ├── tests/
 │   ├── smoke_test.py               # End-to-end demo story (`make smoke`)
+│   ├── fixtures.sql                # Officer the C++ tests sign in as (test database only)
 │   ├── db_test.cpp
 │   ├── os_layer_integration_test.cpp
 │   ├── os_smoke_test.cpp
@@ -284,7 +285,9 @@ justiceflow/
 │
 ├── .gitignore
 ├── folder_structure.txt
-├── justiceflow_setup.sh            # Ubuntu bootstrap / setup script
+├── run_justiceflow.sh              # Set up, build and start everything
+├── install.sh                      # Install, build and test
+├── justiceflow_setup.sh            # Ubuntu system packages
 ├── Makefile
 ├── requirements.txt                # Python dependencies
 └── README.md
@@ -297,7 +300,8 @@ justiceflow/
 ### System
 - Ubuntu 22.04+ (or compatible Linux distribution)
 - GCC 11+ / Clang 14+ with C++17 support
-- CMake 3.20+
+- GNU Make
+- `libreadline-dev`, and `libgtest-dev` for the tests
 - PostgreSQL 14+
 
 ### Python
@@ -320,21 +324,31 @@ git clone https://github.com/Furqan-2006/JusticeFlow.git
 cd JusticeFlow
 ```
 
-### 2. Run the demo
+### 2. Run it
 
-You need PostgreSQL, a C++17 toolchain with libpq headers, Python 3 and `make`. Install the Python packages once, then point the scripts at a PostgreSQL account that can create databases:
+On Ubuntu, from the project folder, as your normal user:
 
 ```bash
-make setup-python                       # agents' dependencies (numpy, scikit-learn, psycopg2, ...)
-pip install -r dashboard/requirements.txt
+./run_justiceflow.sh          # installs what is missing, sets up, builds, starts
+./run_justiceflow.sh stop
+```
 
-export PGHOST=localhost PGUSER=postgres PGPASSWORD=<admin password>
+It asks for a PostgreSQL admin user (it can create one for your Linux account), a dashboard port, and before erasing an existing database. Python packages go into `.venv`.
+
+Both `run_justiceflow.sh` and `install.sh` save their output in `logs/`, in files named with the start time. The database reset, build, daemon and dashboard logs from each start go there too.
+
+To install everything and also run the tests, use `./install.sh` (`--seed-data` fills a new database with demo data; `--help` lists the options). It calls `justiceflow_setup.sh` with `sudo` for the system packages.
+
+The same stack can be driven through `make`, with `PGUSER` naming a PostgreSQL superuser (default: your Linux username, over the local socket; for another account also set `PGHOST=localhost PGPASSWORD=...`):
+
+```bash
+make setup-python                       # .venv with the agents' and dashboard's packages
 make demo                               # reset DB, build, start daemon + dashboard
 make smoke                              # walk the demo story and check every step
 make demo-stop
 ```
 
-`make demo` creates the database from `db/schema/`, seeds about 22,000 synthetic rows (150 officers, all with the password `justice123`), builds the daemon, and starts it and the dashboard at `http://localhost:5000`. It prints a CNIC to sign in with. The daemon and agents use the development passwords of the roles the schema creates; set `JF_DB_PASS` and `JF_AI_DB_PASS` to override them.
+`make demo` **drops and recreates** the `justiceflow` database from `db/schema/`, seeds about 22,000 synthetic rows (150 officers, all with the password `justice123`), builds the daemon, and starts it and the dashboard at `http://localhost:5000`. It prints a CNIC to sign in with. Set `JF_KEEP_DB=1` to keep the existing data. The daemon and agents use the development passwords of the roles the schema creates; set `JF_DB_PASS` and `JF_AI_DB_PASS` to override them.
 
 ### 3. The demo story
 
@@ -416,7 +430,13 @@ Sign in with an officer's CNIC and password (the seeded officers all use `justic
 
 `make smoke` (with the stack running, see above) is the end-to-end check: it signs in, registers an FIR, adds evidence, issues a warrant, waits for the daemon to expire it and for the agents to run, checks the audit trail and that the application role cannot change it, then confirms the dashboard shows the result.
 
-The C++ unit and integration binaries are built and listed with `make list-tests`; run one with, for example, `make db_test`.
+The C++ unit and integration tests use their own `justiceflow_test` database, never the application one:
+
+```bash
+make test-db                            # (re)create justiceflow_test; needs the PostgreSQL superuser
+make test                               # all tests
+make auth_test                          # or one module; `make list-tests` shows them
+```
 
 ---
 

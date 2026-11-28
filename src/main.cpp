@@ -398,8 +398,10 @@ int main(int argc, char *argv[])
         // ====================================================================
         if (!Logger::init("/var/log/justiceflow.log"))
         {
-            // Fall back to stdout if log file fails
-            Logger::init(nullptr);
+            // The system log needs root. Headless runs fall back to stdout; the
+            // interactive CLI stays quiet so messages do not interrupt it.
+            if (args.headless)
+                Logger::init(nullptr);
         }
 
         Logger::info("========================================");

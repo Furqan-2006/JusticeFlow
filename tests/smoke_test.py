@@ -74,7 +74,7 @@ def wait_for(predicate, what):
 
 def main():
     try:
-        admin = psycopg2.connect("")  # PG* environment
+        admin = psycopg2.connect(dbname=os.environ.get("PGDATABASE", "justiceflow"))  # plus the PG* environment
     except psycopg2.Error as exc:
         sys.exit(f"Cannot reach the database as admin ({exc}). Set PGHOST/PGUSER/PGPASSWORD/PGDATABASE.")
     admin.autocommit = True
@@ -156,7 +156,7 @@ def main():
     check(all(r[3] == belt for r in rows), f"rows carry belt number {belt}")
     app_password = os.environ.get("JF_DB_PASS", "justice_app")
     try:
-        app = psycopg2.connect(host=os.environ.get("PGHOST", "localhost"), dbname=os.environ.get("PGDATABASE", "justiceflow"),
+        app = psycopg2.connect(host=os.environ.get("JF_DB_HOST", "127.0.0.1"), dbname=os.environ.get("PGDATABASE", "justiceflow"),
                                user="justice_app", password=app_password)
     except psycopg2.Error as exc:
         check(False, f"could not connect as justice_app to test immutability ({exc})")

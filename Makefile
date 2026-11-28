@@ -16,10 +16,18 @@ TEST_DIR        := tests
 INSTALL_PREFIX  := /usr/local
 DB_SCHEMA_DIR   := db/schema
 DB_SCHEMA_FILES := 00_schema.sql 01_types.sql 02_tables.sql 03_functions.sql 04_triggers.sql 05_indexes.sql 06_permissions.sql schema_patch.sql
-DB_HOST         ?= $(if $(PGHOST),$(PGHOST),localhost)
+DB_HOST         ?= $(if $(PGHOST),$(PGHOST),/var/run/postgresql)
 DB_NAME         ?= $(if $(PGDATABASE),$(PGDATABASE),justiceflow)
-DB_USER         ?= $(if $(PGUSER),$(PGUSER),justiceflow)
+DB_USER         ?= $(if $(PGUSER),$(PGUSER),$(shell id -un))
 SEED_DATA       ?= auto
+
+# Python: the project virtualenv when it exists (see `make setup-python`)
+VENV            := .venv
+PYTHON          := $(if $(wildcard $(VENV)/bin/python),$(CURDIR)/$(VENV)/bin/python,python3)
+
+# Tests use their own database (create it with `make test-db`)
+TEST_DB_NAME    ?= justiceflow_test
+TEST_ENV        := JF_DB_HOST=127.0.0.1 JF_DB_NAME=$(TEST_DB_NAME) JF_DB_USER=justice_app JF_DB_PASS=justice_app
 
 # Compiler settings
 CXX             := g++
@@ -91,7 +99,7 @@ OBJECTS := $(ALL_CPP_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 # Build Rules
 # ============================================================================
 
-.PHONY: all build clean test install help debug release verify-deps init-db seed-db db-reset setup-db setup-python setup-ai setup-status setup-all full-setup demo demo-stop smoke
+.PHONY: test-db all build clean test install help debug release verify-deps init-db seed-db db-reset setup-db setup-python setup-ai setup-status setup-all full-setup demo demo-stop smoke
 
 # Default target
 all: setup-all build
@@ -109,7 +117,7 @@ $(EXECUTABLE): $(OBJECTS)
 $(BUILD_DIR)/%.o: %.cpp
 	@echo "[CXX]  $<"
 	@mkdir -p $(@D)
-	@$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) -MMD -MP $(INCLUDE_DIRS) -c $< -o $@
 
 # ============================================================================
 # Testing
@@ -121,11 +129,7 @@ TEST_OBJECTS := $(TEST_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 
 test: $(TEST_EXECUTABLE)
 	@echo "[RUN]  Running tests..."
-	@export PGHOST=/var/run/postgresql && \
-	 export PGDATABASE=justiceflow && \
-	 export PGUSER=justice_app && \
-	 export JF_TEST_AUTH_FALLBACK='42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123' && \
-	 ./$(TEST_EXECUTABLE)
+	@$(TEST_ENV) ./$(TEST_EXECUTABLE)
 
 $(TEST_EXECUTABLE): $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o, $(OBJECTS)) $(TEST_OBJECTS)
 	@echo "[LINK] Test Suite"
@@ -169,11 +173,12 @@ help:
 	@echo "  verify-deps Check g++, make, python3, pip3, psql, and pg_config"
 	@echo "  init-db     Load DB schema SQL files (00..06) via psql"
 	@echo "  seed-db     Seed database using generator script if available"
-	@echo "  setup-db    Run init-db then seed-db"
+	@echo "  setup-db    Run init-db then seed-db (new databases only)"
+	@echo "  test-db     (Re)create the database the tests use"
 	@echo "  setup-python Install Python dependencies from requirements.txt"
 	@echo "  setup-ai    Verify AI agent imports"
 	@echo "  setup-status Show current setup configuration"
-	@echo "  setup-all   verify-deps -> setup-db -> setup-python -> setup-ai"
+	@echo "  setup-all   verify-deps -> setup-python -> setup-db -> setup-ai"
 	@echo "  full-setup  verify-deps -> setup-all -> build"
 	@echo ""
 	@echo "Current Settings:"
@@ -200,6 +205,8 @@ verify-deps:
 	@echo "  - pg_config: $$(pg_config --version | head -n1)"
 
 init-db:
+	@exists="$$(PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" psql -d postgres -Atc "select 1 from pg_database where datname='$(DB_NAME)'")" || exit 1; \
+	if [ "$$exists" != "1" ]; then PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" createdb "$(DB_NAME)"; fi
 	@echo "[DB] Initializing schema using host=$(DB_HOST) db=$(DB_NAME) user=$(DB_USER)"
 	@for sql_file in $(DB_SCHEMA_FILES); do \
 		file="$(DB_SCHEMA_DIR)/$$sql_file"; \
@@ -228,11 +235,12 @@ seed-db:
 			seed_script="db/data_generator/generate_data.py"; \
 		fi; \
 		if [ -n "$$seed_script" ]; then \
-			if python3 -c "import numpy, psycopg2, faker" >/dev/null 2>&1; then \
+			if $(PYTHON) -c "import numpy, psycopg2, faker" >/dev/null 2>&1; then \
 				echo "[DB] Running seed script: $$seed_script"; \
-				python3 "$$seed_script"; \
+				PGHOST="$(DB_HOST)" PGDATABASE="$(DB_NAME)" PGUSER="$(DB_USER)" $(PYTHON) "$$seed_script"; \
 			else \
 				echo "[DB] Python seed dependencies missing. Run 'make setup-python' first."; \
+				exit 1; \
 			fi; \
 		else \
 			echo "[DB] No data generator found. Skipping seed step."; \
@@ -249,6 +257,11 @@ db-reset:
 	@PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" createdb "$(DB_NAME)"
 	@$(MAKE) --no-print-directory setup-db
 
+# Rebuild the test database: schema, seed data and the test officer.
+test-db:
+	@$(MAKE) --no-print-directory db-reset DB_NAME=$(TEST_DB_NAME) SEED_DATA=1
+	@PGHOST="$(DB_HOST)" PGUSER="$(DB_USER)" psql -q -v ON_ERROR_STOP=1 -d $(TEST_DB_NAME) -f $(TEST_DIR)/fixtures.sql
+
 # Run the whole stack (database, daemon, dashboard) for a demo.
 demo:
 	@scripts/demo.sh start
@@ -258,19 +271,20 @@ demo-stop:
 
 # Walk the demo story against a running stack (see `make demo`).
 smoke:
-	@python3 tests/smoke_test.py
+	@$(PYTHON) tests/smoke_test.py
 
 setup-python:
 	@echo "[PY] Installing dependencies from requirements.txt"
-	@pip3 install -r requirements.txt
+	@test -x $(VENV)/bin/pip || python3 -m venv $(VENV)
+	@$(VENV)/bin/pip install -r requirements.txt -r dashboard/requirements.txt
 
 setup-ai:
 	@echo "[PY] Verifying AI agent imports"
-	@python3 -c "import src.ai_agents.ha; import src.ai_agents.pa" || \
+	@$(PYTHON) -c "import src.ai_agents.ha; import src.ai_agents.pa" || \
 		( echo "[PY] Failed to import required AI agents: ha, pa"; exit 1 )
 	@workload_found=0; \
 	for module_name in src.ai_agents.workload src.ai_agents.workload_agent; do \
-		if python3 -c "import importlib; importlib.import_module('$$module_name')" >/dev/null 2>&1; then \
+		if $(PYTHON) -c "import importlib; importlib.import_module('$$module_name')" >/dev/null 2>&1; then \
 			echo "[PY] Imported $$module_name"; \
 			workload_found=1; \
 			break; \
@@ -297,9 +311,9 @@ setup-status:
 		echo "  Seed script: not found"; \
 	fi
 
-setup-all: verify-deps setup-db setup-python setup-ai
+setup-all: verify-deps setup-python setup-db setup-ai
 
-full-setup: verify-deps setup-all build
+full-setup: setup-all build
 
 # Print variables for debugging Makefile logic
 print-%:
@@ -330,13 +344,6 @@ APP_OBJECTS      := $(filter-out $(BUILD_DIR)/$(SRC_DIR)/main.o, $(OBJECTS))
 # test_common.o — compiled once, linked into every fixture-based test
 TEST_COMMON_OBJ  := $(BUILD_DIR)/$(TEST_DIR)/test_common.o
 
-# Environment variables injected for every individual test run
-TEST_ENV := \
-    PGHOST=/var/run/postgresql \
-    PGDATABASE=justiceflow_test \
-    PGUSER=justice_app \
-    JF_TEST_AUTH_FALLBACK='42401-637951-0=JusticeDemo@2026;12345-6789012-3=password123'
-
 # Directory where per-module test binaries are placed
 TEST_BIN_DIR := $(BUILD_DIR)/tests/bin
 
@@ -350,7 +357,7 @@ TEST_BIN_DIR := $(BUILD_DIR)/tests/bin
 $(BUILD_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.cpp
 	@echo "[CXX]  $<"
 	@mkdir -p $(@D)
-	@$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -I$(TEST_DIR) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) -MMD -MP $(INCLUDE_DIRS) -I$(TEST_DIR) -c $< -o $@
 
 # ─── OS Layer ────────────────────────────────────────────────────────────────
 # Covers: comprehensive OS test, smoke test, os_layer fixture test,
@@ -522,3 +529,6 @@ list-tests:
 	@echo ""
 	@echo "Run all tests at once:  make test"
 	@echo ""
+
+# Rebuild objects when a header they include changes
+-include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)

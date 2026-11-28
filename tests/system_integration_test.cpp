@@ -19,7 +19,7 @@ TEST_F(SystemIntegrationTest, LoginToLogoutFlow)
     auto &sys = system_layer::SystemManager::getInstance();
 
     // Step 1: Login
-    auto login_result = sys.auth().login("42401-637951-0", "JusticeDemo@2026");
+    auto login_result = sys.auth().login("90000-0000001-1", "JusticeDemo@2026");
     EXPECT_TRUE(login_result.ok());
 
     std::string token = login_result.value;
@@ -40,15 +40,20 @@ TEST_F(SystemIntegrationTest, LoginToLogoutFlow)
 TEST_F(SystemIntegrationTest, CaseLifecycle)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database not available";
     }
 
     auto &sys = system_layer::SystemManager::getInstance();
     auto officer = test_utils::createTestOfficer(db.getConnection());
-    auto session = test_utils::createTestSession(officer.officerId);
-    session.rank = JusticeFlow::OfficerRank::SI;
+    // The database only lets an Inspector or higher close a case.
+    PGresult *res = PQexec(db.getConnection(), "SELECT officer_id FROM officers WHERE cnic = '90000-0000001-1'");
+    const int inspector_id = PQntuples(res) == 1 ? std::atoi(PQgetvalue(res, 0, 0)) : 0;
+    PQclear(res);
+    ASSERT_GT(inspector_id, 0) << "Test officer missing: run `make test-db`";
+    auto session = test_utils::createTestSession(inspector_id);
+    session.rank = JusticeFlow::OfficerRank::INSPECTOR;
 
     auto created = test_utils::createTestCase(db.getConnection(), officer.officerId);
     auto fetch = sys.cases().getCaseById(db.getConnection(), created.case_id);
@@ -61,7 +66,7 @@ TEST_F(SystemIntegrationTest, CaseLifecycle)
     EXPECT_TRUE(accused.ok() || accused.code == JusticeFlow::ResultCode::FOREIGN_KEY_VIOLATION);
 
     auto closed = sys.cases().closeCase(db.getConnection(), session, created.case_id, "integration-close");
-    EXPECT_TRUE(closed.ok() || closed.code == JusticeFlow::ResultCode::NOT_FOUND);
+    EXPECT_TRUE(closed.ok());
 }
 
 // =========================================================================
@@ -88,7 +93,7 @@ TEST_F(SystemIntegrationTest, PartialInitRecovery)
 TEST_F(SystemIntegrationTest, CaseDataConsistency)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -112,7 +117,7 @@ TEST_F(SystemIntegrationTest, CaseDataConsistency)
 TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
 {
     MockDatabase db;
-    if (!db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+    if (!db.connect(testConninfo()))
     {
         GTEST_SKIP() << "Database not available";
     }
@@ -125,7 +130,7 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
     std::thread t1([&]()
                    {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+        if (!local_db.connect(testConninfo()))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::MURDER, time(nullptr), "A", "A", 0, 0, 1, session.cnic.c_str());
         if (r.ok())
@@ -133,7 +138,7 @@ TEST_F(SystemIntegrationTest, ConcurrentCaseRegistrationDoesNotDuplicateIds)
     std::thread t2([&]()
                    {
         MockDatabase local_db;
-        if (!local_db.connect("host=/var/run/postgresql dbname=justiceflow user=justice_app password=justice_app"))
+        if (!local_db.connect(testConninfo()))
             return;
         auto r = sys.cases().registerCase(local_db.getConnection(), session, JusticeFlow::CaseType::ROBBERY, time(nullptr), "B", "B", 0, 0, 1, session.cnic.c_str());
         if (r.ok())

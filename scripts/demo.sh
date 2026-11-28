@@ -4,6 +4,8 @@
 #   scripts/demo.sh start   reset the database, build, start daemon + dashboard
 #   scripts/demo.sh stop    stop both
 #
+# Set JF_KEEP_DB=1 to start without resetting the database.
+#
 # Database admin access (to create and seed the database) comes from the usual
 # PGHOST / PGUSER / PGPASSWORD. The daemon and the AI agents connect as the
 # application roles the schema creates; their development passwords are the
@@ -16,6 +18,18 @@ RUN_DIR="${ROOT}/.demo"
 DAEMON_PID="${RUN_DIR}/daemon.pid"
 DASH_PID="${RUN_DIR}/dashboard.pid"
 mkdir -p "${RUN_DIR}"
+# PID files live in .demo/, logs in logs/ (one set per start).
+LOG_DIR="${ROOT}/logs"
+STAMP="${JF_LOG_STAMP:-$(date +%Y%m%d-%H%M%S)}"
+BUILD_LOG="${LOG_DIR}/build-${STAMP}.log"
+DB_LOG="${LOG_DIR}/db-reset-${STAMP}.log"
+DAEMON_LOG="${LOG_DIR}/daemon-${STAMP}.log"
+DASH_LOG="${LOG_DIR}/dashboard-${STAMP}.log"
+
+# Use the project virtualenv if there is one (`make setup-python`).
+if [[ -f "${ROOT}/.venv/bin/activate" ]]; then
+  source "${ROOT}/.venv/bin/activate"
+fi
 
 PORT="${JF_DASHBOARD_PORT:-5000}"
 
@@ -38,6 +52,7 @@ stop() {
 
 start() {
   stop
+  mkdir -p "${LOG_DIR}"
   for cmd in psql python3 make; do
     command -v "${cmd}" >/dev/null || { echo "missing: ${cmd}" >&2; exit 1; }
   done
@@ -46,13 +61,17 @@ start() {
     exit 1
   }
 
-  echo "[demo] resetting database"
-  make -C "${ROOT}" --no-print-directory db-reset >"${RUN_DIR}/db-reset.log" 2>&1 \
-    || { tail -20 "${RUN_DIR}/db-reset.log"; exit 1; }
+  if [[ "${JF_KEEP_DB:-0}" == "1" ]]; then
+    echo "[demo] keeping the existing database"
+  else
+    echo "[demo] resetting database"
+    make -C "${ROOT}" --no-print-directory db-reset >"${DB_LOG}" 2>&1 \
+      || { tail -20 "${DB_LOG}"; exit 1; }
+  fi
 
   echo "[demo] building"
-  make -C "${ROOT}" --no-print-directory build >"${RUN_DIR}/build.log" 2>&1 \
-    || { tail -20 "${RUN_DIR}/build.log"; exit 1; }
+  make -C "${ROOT}" --no-print-directory build >"${BUILD_LOG}" 2>&1 \
+    || { tail -20 "${BUILD_LOG}"; exit 1; }
 
   export JF_DB_HOST="${JF_DB_HOST:-127.0.0.1}"
   export JF_DB_USER="${JF_DB_USER:-justice_app}"
@@ -66,9 +85,9 @@ start() {
   rm -f /tmp/justiceflow.sock
   echo "[demo] starting daemon"
   (cd "${ROOT}" && exec setsid -f ./build/justiceflow --headless --pid-file "${DAEMON_PID}" \
-      >"${RUN_DIR}/daemon.log" 2>&1 </dev/null)
+      >"${DAEMON_LOG}" 2>&1 </dev/null)
   for _ in $(seq 1 50); do [[ -S /tmp/justiceflow.sock ]] && break; sleep 0.2; done
-  [[ -S /tmp/justiceflow.sock ]] || { echo "daemon did not start; see ${RUN_DIR}/daemon.log" >&2; tail -20 "${RUN_DIR}/daemon.log"; exit 1; }
+  [[ -S /tmp/justiceflow.sock ]] || { echo "daemon did not start; see ${DAEMON_LOG}" >&2; tail -20 "${DAEMON_LOG}"; exit 1; }
 
   if curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
     echo "port ${PORT} is already serving something; stop it or set JF_DASHBOARD_PORT" >&2
@@ -78,12 +97,12 @@ start() {
   echo "[demo] starting dashboard"
   (cd "${ROOT}/dashboard" && export JF_DASHBOARD_PORT="${PORT}" && exec setsid -f \
       sh -c 'echo $$ >"$1"; exec python3 run.py' sh "${DASH_PID}" \
-      >"${RUN_DIR}/dashboard.log" 2>&1 </dev/null)
+      >"${DASH_LOG}" 2>&1 </dev/null)
   for _ in $(seq 1 50); do
     curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 && break; sleep 0.2
   done
   curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
-    || { echo "dashboard did not start; see ${RUN_DIR}/dashboard.log" >&2; tail -20 "${RUN_DIR}/dashboard.log"; exit 1; }
+    || { echo "dashboard did not start; see ${DASH_LOG}" >&2; tail -20 "${DASH_LOG}"; exit 1; }
 
   local officer
   officer="$(psql -d "${PGDATABASE:-justiceflow}" -Atc "select cnic || '  (' || current_rank || ')' from officers where status='ACTIVE' and current_rank='INSPECTOR' order by officer_id limit 1")"
@@ -92,7 +111,7 @@ start() {
 JusticeFlow is running.
   Dashboard   http://127.0.0.1:${PORT}
   Sign in     ${officer}   password: justice123
-  Logs        ${RUN_DIR}/
+  Logs        ${LOG_DIR}/
   Check it    make smoke
   Stop        make demo-stop
 MSG

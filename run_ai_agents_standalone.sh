@@ -5,17 +5,20 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${REPO_ROOT}/.venv-ai-agents"
 
 # --- Writer (AI agent) DB connection ---
-: "${PGHOST:=/var/run/postgresql}"
+: "${PGHOST:=127.0.0.1}"
 : "${PGPORT:=5432}"
 : "${PGDATABASE:=justiceflow}"
 : "${PGUSER:=justice_ai}"
-: "${PGPASSWORD:?set PGPASSWORD to the justice_ai role's password}"
+: "${PGPASSWORD:?set PGPASSWORD to the password of the justice_ai role}"
 
 # --- Reader (dashboard/app) DB connection for printing output ---
 : "${PGREADUSER:=justice_app}"
 : "${PGREADPASSWORD:=justice_app}"
 
 export PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD
+# The hotspot and priority agents read JF_DB_* rather than PG*.
+export JF_DB_HOST="${PGHOST}" JF_DB_PORT="${PGPORT}" JF_DB_NAME="${PGDATABASE}"
+export JF_DB_USER="${PGUSER}" JF_DB_PASS="${PGPASSWORD}"
 
 WORKLOAD_AGENT="${REPO_ROOT}/src/ai_agents/workload_agent.py"
 HOTSPOT_AGENT="${REPO_ROOT}/src/ai_agents/ha.py"

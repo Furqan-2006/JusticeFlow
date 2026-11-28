@@ -1,11 +1,13 @@
 #!/bin/bash
 # =============================================================================
-#  JusticeFlow — Full Environment Setup Script
+#  JusticeFlow — System Package Setup
 #  Police Case & Evidence Management System
 #  Multi-Course: DBMS · SDA · AI · OS
 # =============================================================================
 #  Usage:   chmod +x justiceflow_setup.sh && sudo ./justiceflow_setup.sh
-#  Target:  Ubuntu 22.04 / 24.04 LTS
+#  Target:  Ubuntu 22.04 and later
+#  Installs system packages only. Python packages go into .venv
+#  (`make setup-python`) and the database is created by run_justiceflow.sh.
 # =============================================================================
 
 set -e  # Exit immediately on any error
@@ -36,9 +38,6 @@ fi
 # ── Helper: check if an apt package is installed ──────────────────────────────
 apt_installed() { dpkg -s "$1" &>/dev/null; }
 
-# ── Helper: check if a Python package is installed ───────────────────────────
-py_installed()  { python3 -c "import $1" &>/dev/null 2>&1; }
-
 # ── Helper: install apt package only if missing ───────────────────────────────
 apt_install() {
     local pkg="$1"
@@ -48,20 +47,6 @@ apt_install() {
     else
         print_info  "Installing $label …"
         apt-get install -y "$pkg" -qq
-        print_ok "$label installed"
-    fi
-}
-
-# ── Helper: install pip package only if missing ───────────────────────────────
-pip_install() {
-    local import_name="$1"
-    local pip_name="${2:-$1}"
-    local label="${3:-$pip_name}"
-    if py_installed "$import_name"; then
-        print_skip "$label (Python)"
-    else
-        print_info  "Installing Python: $label …"
-        pip3 install --quiet --break-system-packages "$pip_name"
         print_ok "$label installed"
     fi
 }
@@ -98,6 +83,8 @@ print_header "STEP 2 — Build Essentials (SDA / OS Modules)"
 apt_install "build-essential"   "Build Essential (gcc, g++, make)"
 apt_install "g++"               "G++ (C++17 compiler)"
 apt_install "make"              "GNU Make"
+apt_install "libreadline-dev"   "libreadline-dev (CLI line editing headers)"
+apt_install "libgtest-dev"      "GoogleTest (C++ unit tests)"
 apt_install "cmake"             "CMake"
 apt_install "gdb"               "GDB Debugger"
 apt_install "valgrind"          "Valgrind (memory leak checker)"
@@ -130,8 +117,7 @@ else
 fi
 
 apt_install "postgresql-client"     "PostgreSQL client (psql)"
-apt_install "libpq-dev"             "libpq-dev (C client headers for psycopg2)"
-apt_install "pgadmin4"              "pgAdmin 4 (GUI)" || true  # optional, may not be in repo
+apt_install "libpq-dev"             "libpq-dev (C client headers)"
 
 # Start & enable PostgreSQL service
 if systemctl is-active --quiet postgresql; then
@@ -156,30 +142,6 @@ apt_install "python3-venv"   "python3-venv"
 PY_VER=$(python3 --version 2>&1)
 print_info "Python version: $PY_VER"
 
-# Core ML / Data Science libraries
-pip_install "sklearn"        "scikit-learn"     "scikit-learn (ML models)"
-pip_install "numpy"          "numpy"            "NumPy (numerical computing)"
-pip_install "pandas"         "pandas"           "Pandas (data frames)"
-pip_install "scipy"          "scipy"            "SciPy (Hungarian algorithm)"
-pip_install "matplotlib"     "matplotlib"       "Matplotlib (heatmap / plots)"
-pip_install "seaborn"        "seaborn"          "Seaborn (statistical plots)"
-
-# Database connectivity
-pip_install "psycopg2"       "psycopg2-binary"  "psycopg2 (PostgreSQL → Python)"
-pip_install "sqlalchemy"     "SQLAlchemy"       "SQLAlchemy (ORM)"
-
-# AI explainability
-pip_install "shap"           "shap"             "SHAP (model explainability)"
-
-# Synthetic data generation
-pip_install "faker"          "Faker"            "Faker (synthetic data)"
-
-# Job & utility libraries
-pip_install "joblib"         "joblib"           "joblib (model persistence)"
-pip_install "tqdm"           "tqdm"             "tqdm (progress bars)"
-pip_install "tabulate"       "tabulate"         "tabulate (pretty tables in CLI)"
-pip_install "python_dotenv"  "python-dotenv"    "python-dotenv (env vars)"
-
 # =============================================================================
 print_header "STEP 5 — OS / Systems Programming Tools (OS Module)"
 # =============================================================================
@@ -191,7 +153,7 @@ apt_install "libcap2-bin"      "libcap2-bin (getcap / setcap)"
 apt_install "lsof"             "lsof (open file/socket inspector)"
 apt_install "procps"           "procps (ps, top, free — /proc utilities)"
 apt_install "htop"             "htop (process monitor)"
-apt_install "ipcs"             "util-linux (ipcs — IPC status)" || true
+apt_install "util-linux"       "util-linux (ipcs — IPC status)"
 
 # POSIX IPC & threading headers (usually included with glibc-dev)
 apt_install "libc6-dev"        "libc6-dev (glibc headers — POSIX IPC, semaphores)"
@@ -225,7 +187,7 @@ apt_install "jq"               "jq (JSON processor for API responses)"
 # =============================================================================
 print_header "STEP 8 — Documentation & UML"
 # =============================================================================
-apt_install "plantuml"    "PlantUML (UML diagrams from text)" || true
+apt_install "plantuml"    "PlantUML (UML diagrams from text)"
 apt_install "pandoc"      "Pandoc (doc format conversion)"
 
 # Draw.io / Lucidchart are web-based — nothing to install
@@ -268,63 +230,12 @@ check_tool "inotifywait"   "inotifywait --version"
 check_tool "Doxygen"       "doxygen --version"
 check_tool "lsof"          "lsof -v 2>&1 | head -n1"
 
-echo ""
-echo -e "  ${BOLD}Python Libraries:${NC}"
-for lib in sklearn numpy pandas scipy matplotlib seaborn psycopg2 shap faker joblib; do
-    ver=$(python3 -c "import $lib; print(getattr($lib, '__version__', 'installed'))" 2>/dev/null || echo "MISSING")
-    printf "    %-22s %s\n" "$lib" "$ver"
-done
-
-# =============================================================================
-print_header "STEP 11 — PostgreSQL Quick Setup"
-# =============================================================================
-print_info "Creating 'justiceflow' database and user …"
-
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='justiceflow'" | grep -q 1 && {
-    print_skip "PostgreSQL role 'justiceflow'"
-} || {
-    JF_SETUP_DB_PASSWORD="${JF_SETUP_DB_PASSWORD:-$(openssl rand -hex 16)}"
-    sudo -u postgres psql -c "CREATE USER justiceflow WITH PASSWORD '${JF_SETUP_DB_PASSWORD}';" -q
-    print_ok "PostgreSQL user 'justiceflow' created"
-    print_info "Its password is: ${JF_SETUP_DB_PASSWORD}  (shown once; set JF_SETUP_DB_PASSWORD to choose your own)"
-}
-
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='justiceflow'" | grep -q 1 && {
-    print_skip "PostgreSQL database 'justiceflow'"
-} || {
-    sudo -u postgres psql -c "CREATE DATABASE justiceflow OWNER justiceflow;" -q
-    print_ok "PostgreSQL database 'justiceflow' created"
-}
-
-# Grant required privileges
-sudo -u postgres psql -d justiceflow -c "GRANT ALL PRIVILEGES ON DATABASE justiceflow TO justiceflow;" -q
-print_ok "Privileges granted to user 'justiceflow'"
-
-# =============================================================================
-print_header "STEP 12 — Project Directory Structure"
-# =============================================================================
-PROJECT_DIR="${HOME}/justiceflow"
-
-if [[ -d "$PROJECT_DIR" ]]; then
-    print_skip "Project directory already exists at $PROJECT_DIR"
-else
-    mkdir -p "$PROJECT_DIR"/{src/{core,patterns,os_layer},db/{schema,triggers,procedures,views,seeds,tests},ai/{agents,models,data,analytics},docs/{uml,api},scripts,logs,evidence_store,backups}
-    print_ok "Project directory tree created at $PROJECT_DIR"
-fi
-
 # =============================================================================
 echo ""
 echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}${BOLD}║   ✔  JusticeFlow setup complete!                ║${NC}"
 echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${BOLD}Next Steps:${NC}"
-echo    "  1. cd ~/justiceflow"
-echo    "  2. git init && git remote add origin <your-repo-url>"
-echo    "  3. Load DB schema:  psql -U justiceflow -d justiceflow -f db/schema/init.sql"
-echo    "  4. Compile C++:     cd src && make"
-echo    "  5. Run AI setup:    python3 ai/agents/hotspot.py --generate-data"
-echo ""
-echo -e "  ${CYAN}PostgreSQL connection string:${NC}"
-echo    "  postgresql://justiceflow:<password>@localhost:5432/justiceflow"
+echo -e "  ${BOLD}Next step${NC} (as your normal user, from the project folder):"
+echo    "    ./run_justiceflow.sh"
 echo ""
